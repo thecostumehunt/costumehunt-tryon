@@ -62,18 +62,25 @@ with col1:
         )
 
 with col2:
-    st.info("💡 **Best Results:**\n• Single garment\n• Front-facing\n• Tops/dresses")
+    st.info("💡 **Best Results:**\n• Single garment\n• Front-facing\n• Plain background")
 
 # ========================================
 # HELPER FUNCTIONS
 # ========================================
-def image_to_base64(image_data):
-    """Convert any image (jpg/png/webp) to base64 PNG"""
+def image_to_base64(image_data, max_side=1024):
+    """Convert image to base64 PNG, keep proportions, reduce hallucination"""
     if hasattr(image_data, 'seek'):
         image_data.seek(0)
+
     img = Image.open(image_data).convert("RGB")
+    w, h = img.size
+
+    scale = max_side / max(w, h)
+    if scale < 1:
+        img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+
     buffer = io.BytesIO()
-    img.save(buffer, format="PNG")
+    img.save(buffer, format="PNG", optimize=True)
     img_str = base64.b64encode(buffer.getvalue()).decode()
     return f"data:image/png;base64,{img_str}"
 
@@ -98,7 +105,7 @@ if st.button("✨ **GENERATE AI TRY-ON** ✨", type="primary", use_container_wid
     # ========================================
     # AI PROCESSING
     # ========================================
-    with st.spinner("🎨 **Real AI clothing transfer in progress... 20–40 seconds**"):
+    with st.spinner("🎨 **Preserving body, face, and clothing details... 20–40s**"):
         try:
             # Prepare images
             person_b64 = image_to_base64(user_image)
@@ -108,7 +115,7 @@ if st.button("✨ **GENERATE AI TRY-ON** ✨", type="primary", use_container_wid
             outfit_b64 = image_to_base64(io.BytesIO(outfit_response.content))
 
             # ====================================
-            # FAL API CALL
+            # FAL API CALL (FIDELITY MODE)
             # ====================================
             FAL_URL = "https://fal.run/fal-ai/idm-vton"
             headers = {
@@ -119,7 +126,12 @@ if st.button("✨ **GENERATE AI TRY-ON** ✨", type="primary", use_container_wid
             payload = {
                 "human_image_url": person_b64,
                 "garment_image_url": outfit_b64,
-                "description": "professional fashion model wearing exact garment, full body shot, clean studio lighting, high quality photography"
+                "description": (
+                    "same person, same face, same body shape, preserve identity, "
+                    "preserve pose, preserve proportions, exact clothing transfer, "
+                    "copy garment exactly from reference image, realistic try-on, "
+                    "do not stylize, do not beautify, no body reshaping, no face change"
+                )
             }
 
             api_response = requests.post(FAL_URL, json=payload, headers=headers, timeout=120)
@@ -180,7 +192,7 @@ if st.button("✨ **GENERATE AI TRY-ON** ✨", type="primary", use_container_wid
             # ====================================
             # SUCCESS UI
             # ====================================
-            st.success("🎉 **PERFECT! Real AI clothing transfer complete**")
+            st.success("🎉 **Try-on complete – identity & proportions preserved**")
             st.balloons()
 
             st.session_state.used_free = True
@@ -208,11 +220,11 @@ if st.button("✨ **GENERATE AI TRY-ON** ✨", type="primary", use_container_wid
         except Exception as e:
             st.error(f"❌ AI Error: {str(e)[:150]}...")
             st.info("""
-            **🔧 Tips**
-            • Full body standing photos  
-            • Single garment images  
-            • Front-facing clothes  
-            • Good lighting helps  
+            **🔧 Quality tips**
+            • Full body, standing, neutral pose  
+            • Plain background  
+            • Single garment only  
+            • Front-facing clothing images  
             """)
 
 # ========================================
@@ -224,9 +236,9 @@ col1, col2 = st.columns([1, 1])
 with col1:
     st.markdown("""
     **🔒 Privacy Guaranteed**
-    - Photos auto-deleted instantly  
     - No storage  
-    - Browser-memory processing  
+    - No database  
+    - In-memory processing  
     """)
 
 with col2:
@@ -237,4 +249,4 @@ with col2:
     - TheCostumeHunt.com  
     """)
 
-st.caption("👗 Daily wear fashion inspiration for women")
+st.caption("👗 Virtual try-on powered by real AI")
