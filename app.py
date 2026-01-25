@@ -86,7 +86,7 @@ if st.button("✨ Try it on"):
         st.warning("Please upload your photo and provide an outfit image.")
         st.stop()
 
-    with st.spinner("Creating your virtual try-on… please wait"):
+    with st.spinner("Creating your virtual try-on… please wait 30–60 seconds"):
         person_path = None
         cloth_path = None
 
@@ -95,27 +95,30 @@ if st.button("✨ Try it on"):
             person_path = save_temp_image(user_image)
             cloth_path = download_image(cloth_url)
 
-            # Upload to FAL CDN
+            # Upload to FAL
             person_url = fal_client.upload_file(person_path)
-            cloth_url_uploaded = fal_client.upload_file(cloth_path)
+            garment_url = fal_client.upload_file(cloth_path)
 
-            # Subscribe (official method)
+            # Subscribe (official queue-based call)
             handler = fal_client.subscribe(
                 "fal-ai/kling/v1-5/kolors-virtual-try-on",
                 arguments={
                     "human_image_url": person_url,
-                    "garment_image_url": cloth_url_uploaded
+                    "garment_image_url": garment_url
                 },
                 with_logs=True
             )
 
-            # Wait for result
-            result = handler.get()
+            # ✅ REQUIRED timeout argument
+            result = handler.get(timeout=600)
 
-            if "image_url" not in result:
-                raise ValueError("No output image returned.")
-
-            output_url = result["image_url"]
+            # Extract image
+            if "image_url" in result:
+                output_url = result["image_url"]
+            elif "image" in result and "url" in result["image"]:
+                output_url = result["image"]["url"]
+            else:
+                raise ValueError("No image URL returned by FAL")
 
             st.image(output_url, caption="Your real virtual try-on", use_column_width=True)
             st.success("🎉 Your try-on is ready!")
@@ -128,7 +131,7 @@ if st.button("✨ Try it on"):
             st.info("""
 Best results:
 • Full-body standing photo  
-• Outfit on clean/plain background  
+• Outfit image on plain background  
 • Avoid collages or screenshots
 """)
 
