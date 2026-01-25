@@ -95,12 +95,12 @@ if st.button("✨ Try it on"):
             person_path = save_temp_image(user_image)
             cloth_path = download_image(cloth_url)
 
-            # Upload to FAL
+            # Upload to FAL CDN
             person_url = fal_client.upload_file(person_path)
             garment_url = fal_client.upload_file(cloth_path)
 
-            # Subscribe (official queue-based call)
-            handler = fal_client.subscribe(
+            # ✅ Official queue-based Kolors call (your version returns dict directly)
+            result = fal_client.subscribe(
                 "fal-ai/kling/v1-5/kolors-virtual-try-on",
                 arguments={
                     "human_image_url": person_url,
@@ -109,16 +109,15 @@ if st.button("✨ Try it on"):
                 with_logs=True
             )
 
-            # ✅ REQUIRED timeout argument
-            result = handler.get(timeout=600)
-
-            # Extract image
+            # Extract output
             if "image_url" in result:
                 output_url = result["image_url"]
+            elif "data" in result and "image_url" in result["data"]:
+                output_url = result["data"]["image_url"]
             elif "image" in result and "url" in result["image"]:
                 output_url = result["image"]["url"]
             else:
-                raise ValueError("No image URL returned by FAL")
+                raise ValueError("No output image found in FAL response")
 
             st.image(output_url, caption="Your real virtual try-on", use_column_width=True)
             st.success("🎉 Your try-on is ready!")
