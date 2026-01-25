@@ -87,18 +87,14 @@ if st.button("✨ Try it on"):
             cloth_path = download_image(cloth_url)
 
             output = replicate.run(
-                "cuuupid/idm-vton",
+                "yisol/virtual-try-on",
                 input={
-                    "human": open(person_path, "rb"),
-                    "garm": open(cloth_path, "rb"),
-                    "garment_des": "daily wear outfit",
-                    "crop": True,
-                    "denoise_steps": 30,
-                    "seed": 42
+                    "person_image": open(person_path, "rb"),
+                    "cloth_image": open(cloth_path, "rb")
                 }
             )
 
-            st.image(output, caption="Your try-on result", use_container_width=True)
+            st.image(output[0], caption="Your try-on result", use_container_width=True)
             st.success("🎉 Your try-on is ready!")
             st.session_state.free_used = True
 
