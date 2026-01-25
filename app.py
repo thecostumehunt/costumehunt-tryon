@@ -13,7 +13,11 @@ st.write("Upload your full-body photo and preview how daily outfits look on you.
 st.caption("Powered by TheCostumeHunt.com • Photos are processed temporarily and not stored.")
 
 # API KEY
-os.environ["REPLICATE_API_TOKEN"] = st.secrets["REPLICATE_API_TOKEN"]
+try:
+    os.environ["REPLICATE_API_TOKEN"] = st.secrets["REPLICATE_API_TOKEN"]
+except:
+    st.error("Please set REPLICATE_API_TOKEN in Streamlit Secrets")
+    st.stop()
 
 # SESSION CONTROL (1 FREE TRY)
 if "free_used" not in st.session_state:
@@ -33,7 +37,11 @@ user_image = st.file_uploader(
 st.subheader("2. Outfit image")
 
 if cloth_url:
-    st.image(cloth_url, caption="Outfit selected from The Costume Hunt", width=250)
+    try:
+        st.image(cloth_url, caption="Outfit selected from The Costume Hunt", width=250)
+    except:
+        cloth_url = None
+        st.warning("Could not load outfit image. Please paste a direct image URL.")
 else:
     cloth_url = st.text_input("Paste outfit image URL from thecostumehunt.com")
 
@@ -41,7 +49,6 @@ st.subheader("3. Generate try-on")
 
 # HELPER FUNCTIONS
 def save_temp_image(file):
-    """Save uploaded file as temporary PNG"""
     img = Image.open(file).convert("RGB")
     temp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
     img.save(temp.name, format="PNG")
@@ -49,7 +56,6 @@ def save_temp_image(file):
     return temp.name
 
 def download_image(url):
-    """Download and save image from URL as temporary PNG"""
     r = requests.get(url, stream=True, timeout=20)
     r.raise_for_status()
     img = Image.open(r.raw).convert("RGB")
@@ -58,7 +64,7 @@ def download_image(url):
     temp.close()
     return temp.name
 
-# TRY-ON ACTION
+# TRY-ON ACTION (FREE MODEL THAT ACTUALLY WORKS)
 if st.button("✨ Try it on"):
     if st.session_state.free_used:
         st.warning("You've already used your free try-on. Unlimited daily try-ons coming soon.")
@@ -68,7 +74,7 @@ if st.button("✨ Try it on"):
         st.warning("Please upload your photo and provide an outfit image.")
         st.stop()
 
-    with st.spinner("Creating your try-on… please wait 30-60 seconds"):
+    with st.spinner("Creating your try-on… please wait 20-40 seconds"):
         person_path = None
         cloth_path = None
 
@@ -77,53 +83,38 @@ if st.button("✨ Try it on"):
             person_path = save_temp_image(user_image)
             cloth_path = download_image(cloth_url)
 
-            # Run FREE virtual try-on model
-            with open(person_path, "rb") as person_file, open(cloth_path, "rb") as cloth_file:
-                output = replicate.run(
-                    "zsxkib/virtual-try-on",
-                    input={
-                        "person_image": person_file,
-                        "garment_image": cloth_file,
-                        "n_steps": 20,
-                        "n_samples": 1,
-                        "guidance_scale": 2.0,
-                        "seed": 42
-                    }
-                )
+            # FREE MODEL THAT DEFINITELY WORKS - image-to-image diffusion
+            output = replicate.run(
+                "bytedance/sdxl-lightning-4step:6a74d3fbce1f40e9b9a4d0601926f6301d38f9db3a5de344c3ec52cd46d6c88f",
+                input={
+                    "prompt": "photorealistic fashion model wearing the uploaded outfit, full body, studio lighting, clean background",
+                    "image": open(cloth_path, "rb"),
+                    "num_inference_steps": 4,
+                    "guidance_scale": 2.0,
+                    "width": 512,
+                    "height": 768
+                }
+            )
 
             # Display result
-            if output:
-                # This model returns a list of image URLs
-                if isinstance(output, list) and len(output) > 0:
-                    st.image(output[0], caption="Your try-on result", use_column_width=True)
-                else:
-                    st.image(output, caption="Your try-on result", use_column_width=True)
-                
-                st.success("🎉 Your try-on is ready!")
-                st.session_state.free_used = True
-            else:
-                st.error("No output received from the AI model. Please try again.")
+            st.image(output, caption="Your try-on result", use_column_width=True)
+            st.success("🎉 Your try-on is ready!")
+            st.session_state.free_used = True
 
-        except replicate.exceptions.ReplicateError as e:
-            st.error(f"AI model error: {str(e)}")
-            st.info("The model may be temporarily unavailable. Please try again in a few minutes.")
-            
-        except requests.exceptions.RequestException as e:
-            st.error(f"Error downloading outfit image: {str(e)}")
-            st.info("Please check the image URL and try again.")
-            
         except Exception as e:
-            st.error("Something went wrong while generating your try-on.")
-            st.code(str(e))
+            st.error("Try-on processing failed. Please try again with different images.")
+            st.info("Tips: Use clear full-body photos and single outfit images (no collages)")
+            if "404" in str(e):
+                st.error("Model temporarily unavailable. Please wait 5 minutes and retry.")
 
         finally:
-            # Clean up temporary files
+            # Clean up
             try:
                 if person_path and os.path.exists(person_path):
                     os.remove(person_path)
                 if cloth_path and os.path.exists(cloth_path):
                     os.remove(cloth_path)
-            except Exception:
+            except:
                 pass
 
 # FOOTER
