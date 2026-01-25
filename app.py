@@ -6,7 +6,7 @@ from PIL import Image
 import replicate
 
 # ----------------------------------
-# BASIC PAGE SETUP
+# PAGE SETUP
 # ----------------------------------
 st.set_page_config(page_title="The Costume Hunt – Try On", layout="centered")
 
@@ -37,7 +37,7 @@ cloth_url = query_params.get("cloth", None)
 st.subheader("1. Upload your photo")
 user_image = st.file_uploader(
     "Upload a clear, full-body photo (standing, good light, simple background works best)",
-    type=["jpg", "jpeg", "png"]
+    type=["jpg", "jpeg", "png", "webp"]
 )
 
 st.subheader("2. Outfit image")
@@ -59,10 +59,11 @@ def save_temp_image(file):
     return temp.name
 
 def download_image(url):
-    r = requests.get(url, timeout=20)
+    r = requests.get(url, stream=True, timeout=20)
     r.raise_for_status()
+    img = Image.open(r.raw).convert("RGB")
     temp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    temp.write(r.content)
+    img.save(temp.name)
     return temp.name
 
 # ----------------------------------
@@ -102,7 +103,7 @@ if st.button("✨ Try it on"):
             st.session_state.free_used = True
 
         except Exception as e:
-            st.error("Something went wrong while generating your try-on. Please try a different image.")
+            st.error("Something went wrong while generating your try-on. Please try different images.")
             st.code(str(e))
 
         finally:
@@ -118,5 +119,5 @@ if st.button("✨ Try it on"):
 # FOOTER / TRUST
 # ----------------------------------
 st.markdown("---")
-st.write("🔒 Photos are processed temporarily and deleted automatically.")
+st.write("🔒 Photos are processed temporarily and automatically deleted.")
 st.write("🩷 Daily-wear fashion inspiration by TheCostumeHunt.com")
