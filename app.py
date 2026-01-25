@@ -1,32 +1,43 @@
-import streamlit as st
+import replicate
+import tempfile
+import requests
+from PIL import Image
+from rembg import remove
+import os
 
-st.set_page_config(page_title="The Costume Hunt – Try On", layout="centered")
+os.environ["REPLICATE_API_TOKEN"] = st.secrets["REPLICATE_API_TOKEN"]
 
-st.title("👗 Try This Outfit On Yourself")
-st.write("Upload your full-body photo and preview how daily outfits look on you.")
+def save_temp_image(file):
+    img = Image.open(file).convert("RGB")
+    img = remove(img)  # background cleanup
+    temp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+    img.save(temp.name)
+    return temp.name
 
-# Read clothing image from URL parameter
-query_params = st.query_params
-cloth_url = query_params.get("cloth", None)
-
-st.subheader("1. Upload your photo")
-user_image = st.file_uploader("Upload a clear full-body photo", type=["jpg", "jpeg", "png"])
-
-st.subheader("2. Outfit image")
-if cloth_url:
-    st.image(cloth_url, caption="Selected outfit from The Costume Hunt", width=250)
-else:
-    cloth_url = st.text_input("Paste outfit image URL from thecostumehunt.com")
-
-st.subheader("3. Generate try-on")
+def download_image(url):
+    r = requests.get(url)
+    temp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+    temp.write(r.content)
+    return temp.name
 
 if st.button("Try it on"):
     if not user_image or not cloth_url:
         st.warning("Please upload your photo and provide an outfit image.")
-    else:
-        st.success("✅ App is working. AI try-on will be added here next.")
-        st.image(user_image, caption="Your uploaded photo", width=250)
-        st.image(cloth_url, caption="Outfit image", width=250)
+        st.stop()
 
-st.markdown("---")
-st.caption("Powered by TheCostumeHunt.com • Photos are not stored.")
+    with st.spinner("Creating your try-on…"):
+        person_path = save_temp_image(user_image)
+        cloth_path = download_image(cloth_url)
+
+        output = replicate.run(
+            "tencentarc/try-on-diffusion",
+            input={
+                "person_image": open(person_path, "rb"),
+                "clothing_image": open(cloth_path, "rb")
+            }
+        )
+
+        st.image(output[0], caption="Your try-on result", use_container_width=True)
+
+        os.remove(person_path)
+        os.remove(cloth_path)
