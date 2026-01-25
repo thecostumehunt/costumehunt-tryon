@@ -25,7 +25,7 @@ except:
     st.stop()
 
 # ---------------------------
-# SESSION CONTROL (1 FREE TRY)
+# SESSION CONTROL
 # ---------------------------
 if "free_used" not in st.session_state:
     st.session_state.free_used = False
@@ -33,24 +33,31 @@ if "free_used" not in st.session_state:
 query_params = st.query_params
 cloth_url = query_params.get("cloth", None)
 
+# ---------------------------
+# UI
+# ---------------------------
 st.subheader("1. Upload your photo")
 user_image = st.file_uploader(
-    "Full-body photo (standing pose, good light)",
+    "Upload a clear full-body photo (head to feet visible)",
     type=["jpg", "jpeg", "png", "webp"]
 )
 
-st.subheader("2. Outfit image (full outfit)")
+st.subheader("2. Outfit image (full outfit: top + bottom / dress)")
+
 if cloth_url:
     try:
         st.image(cloth_url, caption="Selected outfit", width=260)
     except:
         cloth_url = None
-        st.warning("Could not load outfit image. Paste a direct image URL.")
+        st.warning("Could not load image. Paste a direct image URL.")
 else:
     cloth_url = st.text_input("Paste outfit image URL")
 
 st.subheader("3. Generate try-on")
 
+# ---------------------------
+# HELPERS
+# ---------------------------
 def save_temp_image(file):
     img = Image.open(file).convert("RGB")
     temp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
@@ -67,57 +74,61 @@ def download_image(url):
     temp.close()
     return temp.name
 
+# ---------------------------
+# TRY-ON
+# ---------------------------
 if st.button("✨ Try it on"):
     if st.session_state.free_used:
-        st.warning("Free try-on used. Try again later.")
+        st.warning("You've already used your free try-on. More coming soon.")
         st.stop()
 
     if not user_image or not cloth_url:
-        st.warning("Upload both your photo and an outfit image.")
+        st.warning("Please upload your photo and provide an outfit image.")
         st.stop()
 
-    with st.spinner("Processing… please wait"):
+    with st.spinner("Creating your virtual try-on… please wait"):
         person_path = None
         cloth_path = None
 
         try:
+            # Prepare images
             person_path = save_temp_image(user_image)
             cloth_path = download_image(cloth_url)
 
+            # ✅ Upload images to FAL
+            person_upload = fal_client.upload_file(person_path)
+            cloth_upload = fal_client.upload_file(cloth_path)
+
+            # ✅ Run Kolors Virtual Try-On
             result = fal_client.run(
                 "fal-ai/koloa-virtual-tryon",
                 arguments={
-                    "human_image": open(person_path, "rb"),
-                    "garment_image": open(cloth_path, "rb"),
-                    "category": "full",
-                    "mode": "quality"
+                    "human_image": person_upload,
+                    "garment_image": cloth_upload,
+                    "category": "full",   # upper | lower | dress | full
+                    "mode": "quality"     # fast | quality
                 }
             )
 
-            # Show debug info
-            st.write("👉 Raw API response:", result)
-
             if "image" not in result or "url" not in result["image"]:
-                raise ValueError("Invalid result from FAL – no image URL")
+                raise ValueError("Invalid response from FAL API")
 
             output_url = result["image"]["url"]
-            st.image(output_url, caption="Your try-on result", use_column_width=True)
-            st.success("🎉 Try-on complete!")
+
+            st.image(output_url, caption="Your real virtual try-on", use_column_width=True)
+            st.success("🎉 Your try-on is ready!")
             st.session_state.free_used = True
 
         except Exception as e:
-            st.error("🚨 Try-on processing failed.")
-            st.write("**Error type:**", type(e).__name__)
-            st.write("**Error message:**", str(e))
-            st.write("**Traceback (debug):**")
+            st.error("🚨 Try-on failed.")
+            st.write("Error:", str(e))
             st.text(traceback.format_exc())
-
             st.info("""
-                **Tips for success:**
-                • Full body photo (head + feet visible)  
-                • Clear outfit image with plain background  
-                • Avoid text, logos, collages in outfit image
-            """)
+Tips for best results:
+• Full-body standing photo  
+• Outfit on clean/plain background  
+• Avoid collages and screenshots
+""")
 
         finally:
             try:
@@ -128,6 +139,9 @@ if st.button("✨ Try it on"):
             except:
                 pass
 
+# ---------------------------
+# FOOTER
+# ---------------------------
 st.markdown("---")
-st.write("🔒 Photos are processed temporarily and auto-deleted.")
-st.write("🩷 Daily inspiration by TheCostumeHunt.com")
+st.write("🔒 Photos are processed temporarily and deleted automatically.")
+st.write("🩷 Daily-wear inspiration by TheCostumeHunt.com")
