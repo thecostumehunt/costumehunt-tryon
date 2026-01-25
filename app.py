@@ -1,237 +1,137 @@
 import streamlit as st
+import tempfile
 import requests
-import io
-from PIL import Image
-import base64
 import os
+from PIL import Image
+import fal_client
 
-# ========================================
+# ---------------------------
 # PAGE SETUP
-# ========================================
-st.set_page_config(
-    page_title="The Costume Hunt – Try On", 
-    layout="centered",
-    page_icon="👗"
-)
+# ---------------------------
+st.set_page_config(page_title="The Costume Hunt – Try On", layout="centered")
 
-st.title("👗 Virtual Try-On")
-st.markdown("**Upload your photo + outfit = AI puts clothes on your body**")
-st.caption("Powered by TheCostumeHunt.com • Real AI • Photos auto-deleted")
+st.title("👗 Try This Outfit On Yourself")
+st.write("Upload your full-body photo and preview how a full outfit looks on you.")
+st.caption("Powered by TheCostumeHunt.com • Photos are processed temporarily and not stored.")
 
-# ========================================
-# SECRETS & STATE
-# ========================================
-os.environ["FAL_KEY"] = st.secrets["FAL_KEY"]
+# ---------------------------
+# API KEY
+# ---------------------------
+try:
+    os.environ["FAL_KEY"] = st.secrets["FAL_KEY"]
+except:
+    st.error("Please set FAL_KEY in Streamlit Secrets")
+    st.stop()
 
-if "used_free" not in st.session_state:
-    st.session_state.used_free = False
+# ---------------------------
+# SESSION CONTROL (1 FREE TRY)
+# ---------------------------
+if "free_used" not in st.session_state:
+    st.session_state.free_used = False
 
-# ========================================
-# BLOG INTEGRATION
-# ========================================
+# ---------------------------
+# GET OUTFIT FROM BLOG LINK
+# ---------------------------
 query_params = st.query_params
-cloth_url = query_params.get("cloth", "")
+cloth_url = query_params.get("cloth", None)
 
-# ========================================
-# UI - PHOTO UPLOAD
-# ========================================
-st.subheader("📸 1. Upload Your Photo")
+# ---------------------------
+# UI INPUTS
+# ---------------------------
+st.subheader("1. Upload your photo")
 user_image = st.file_uploader(
-    "Upload **FULL BODY** photo (standing works best)",
-    type=["jpg", "jpeg", "png", "webp"],
-    help="Plain background + full torso visible = best AI results"
+    "Upload a clear, full-body photo (standing pose, good light works best)",
+    type=["jpg", "jpeg", "png", "webp"]
 )
 
-# ========================================
-# UI - OUTFIT IMAGE
-# ========================================
-st.subheader("👗 2. Outfit Image")
-col1, col2 = st.columns([4, 1])
+st.subheader("2. Outfit image (full outfit: top + bottom / dress)")
 
-with col1:
-    if cloth_url:
-        try:
-            st.image(cloth_url, caption="✅ Auto-loaded from blog", width=300)
-        except:
-            cloth_url = ""
-            st.warning("Invalid image URL")
-    else:
-        cloth_url = st.text_input(
-            "Paste outfit image URL from thecostumehunt.com",
-            placeholder="https://thecostumehunt.com/wp-content/uploads/outfit.webp"
-        )
+if cloth_url:
+    try:
+        st.image(cloth_url, caption="Outfit selected from The Costume Hunt", width=260)
+    except:
+        cloth_url = None
+        st.warning("Could not load outfit image. Please paste a direct image URL.")
+else:
+    cloth_url = st.text_input("Paste outfit image URL from thecostumehunt.com")
 
-with col2:
-    st.info("💡 **Best Results:**\n• Single garment\n• Front-facing\n• Full top visible\n• Plain background")
+st.subheader("3. Generate try-on")
 
-# ========================================
-# IMAGE HELPERS
-# ========================================
+# ---------------------------
+# HELPERS
+# ---------------------------
+def save_temp_image(file):
+    img = Image.open(file).convert("RGB")
+    temp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+    img.save(temp.name, format="PNG")
+    temp.close()
+    return temp.name
 
-def pad_to_square(img, bg_color=(255, 255, 255)):
-    w, h = img.size
-    s = max(w, h)
-    new_img = Image.new("RGB", (s, s), bg_color)
-    new_img.paste(img, ((s - w) // 2, (s - h) // 2))
-    return new_img
+def download_image(url):
+    r = requests.get(url, stream=True, timeout=25)
+    r.raise_for_status()
+    img = Image.open(r.raw).convert("RGB")
+    temp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+    img.save(temp.name, format="PNG")
+    temp.close()
+    return temp.name
 
-def normalize_image(image_data, max_side=1024):
-    if hasattr(image_data, "seek"):
-        image_data.seek(0)
-
-    img = Image.open(image_data).convert("RGB")
-
-    w, h = img.size
-    scale = max_side / max(w, h)
-    if scale < 1:
-        img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
-
-    img = pad_to_square(img)
-    return img
-
-def image_to_base64(image_data):
-    img = normalize_image(image_data)
-    buffer = io.BytesIO()
-    img.save(buffer, format="PNG", optimize=True)
-    img_str = base64.b64encode(buffer.getvalue()).decode()
-    return f"data:image/png;base64,{img_str}"
-
-# ========================================
-# AI TRY-ON
-# ========================================
-if st.button("✨ **GENERATE AI TRY-ON** ✨", type="primary", use_container_width=True):
-
-    if st.session_state.used_free:
-        st.error("🆓 **Free try used!** Refresh page for 1 more free try.")
+# ---------------------------
+# TRY-ON ACTION
+# ---------------------------
+if st.button("✨ Try it on"):
+    if st.session_state.free_used:
+        st.warning("You've already used your free try-on. Unlimited try-ons coming soon.")
         st.stop()
 
-    if not user_image:
-        st.error("📸 **Upload your photo first**")
+    if not user_image or not cloth_url:
+        st.warning("Please upload your photo and provide an outfit image.")
         st.stop()
 
-    if not cloth_url:
-        st.error("👗 **Enter outfit image URL**")
-        st.stop()
+    with st.spinner("Creating your virtual try-on… please wait 20–40 seconds"):
+        person_path = None
+        cloth_path = None
 
-    with st.spinner("🎨 **Preserving proportions & garment boundaries...**"):
         try:
             # Prepare images
-            person_b64 = image_to_base64(user_image)
+            person_path = save_temp_image(user_image)
+            cloth_path = download_image(cloth_url)
 
-            outfit_response = requests.get(cloth_url, timeout=20)
-            outfit_response.raise_for_status()
-            outfit_b64 = image_to_base64(io.BytesIO(outfit_response.content))
+            # FAL Kolors Virtual Try-On
+            result = fal_client.run(
+                "fal-ai/koloa-virtual-tryon",
+                arguments={
+                    "human_image": open(person_path, "rb"),
+                    "garment_image": open(cloth_path, "rb"),
+                    "category": "full",   # upper | lower | dress | full
+                    "mode": "quality"     # fast | quality
+                }
+            )
 
-            # ====================================
-            # FAL API CALL
-            # ====================================
-            FAL_URL = "https://fal.run/fal-ai/idm-vton"
-            headers = {
-                "Authorization": f"Key {st.secrets['FAL_KEY']}",
-                "Content-Type": "application/json"
-            }
+            output_url = result["image"]["url"]
 
-            payload = {
-                "human_image_url": person_b64,
-                "garment_image_url": outfit_b64,
-                "description": (
-                    "same person, preserve identity and pose, preserve body proportions, "
-                    "transfer the exact garment from the reference image, "
-                    "top length must match the reference garment, "
-                    "hemline position must stay consistent, "
-                    "do not crop the top, do not extend the top, "
-                    "sleeve length must match the reference, "
-                    "realistic try-on, no stylization, no beautification, no body reshaping"
-                )
-            }
-
-            api_response = requests.post(FAL_URL, json=payload, headers=headers, timeout=120)
-            api_response.raise_for_status()
-            result = api_response.json()
-
-            # ====================================
-            # EXTRACT RESULT
-            # ====================================
-            output_image = None
-
-            if "images" in result and result["images"]:
-                first = result["images"][0]
-                if isinstance(first, dict) and "url" in first:
-                    output_image = first["url"]
-                else:
-                    output_image = first
-
-            elif "image" in result:
-                if isinstance(result["image"], dict) and "url" in result["image"]:
-                    output_image = result["image"]["url"]
-                else:
-                    output_image = result["image"]
-
-            elif "output" in result:
-                output_image = result["output"]
-
-            if not output_image:
-                st.error("No image returned from AI")
-                st.json(result)
-                st.stop()
-
-            # ====================================
-            # DISPLAY RESULT
-            # ====================================
-            image_bytes = None
-
-            if isinstance(output_image, str):
-
-                if output_image.startswith("http"):
-                    st.image(output_image, caption="✅ YOUR AI TRY-ON RESULT", use_column_width=True)
-                    image_bytes = requests.get(output_image).content
-
-                elif "base64" in output_image:
-                    image_bytes = base64.b64decode(output_image.split(",")[-1])
-                    result_img = Image.open(io.BytesIO(image_bytes))
-                    st.image(result_img, caption="✅ YOUR AI TRY-ON RESULT", use_column_width=True)
-
-                else:
-                    st.error("Unknown image format returned")
-                    st.stop()
-
-            else:
-                st.error("Unsupported image format returned by AI")
-                st.stop()
-
-            # ====================================
-            # SUCCESS UI
-            # ====================================
-            st.success("🎉 Try-on complete — garment boundaries biased")
-
-            st.session_state.used_free = True
-
-            col1, col2, col3 = st.columns(3)
-
-            with col1:
-                if image_bytes:
-                    st.download_button(
-                        label="💾 Download Result",
-                        data=image_bytes,
-                        file_name="thecostumehunt-tryon.png",
-                        mime="image/png"
-                    )
-
-            with col2:
-                if st.button("🔄 New Try-On", use_container_width=True):
-                    st.rerun()
-
-            with col3:
-                st.success("📱 Pinterest ready!")
-
-            st.markdown("**✨ Share your result on Pinterest!**")
+            st.image(output_url, caption="Your real virtual try-on", use_column_width=True)
+            st.success("🎉 Your try-on is ready!")
+            st.session_state.free_used = True
 
         except Exception as e:
-            st.error(f"❌ Error: {str(e)[:150]}")
-            st.info("Use full body photos, plain background, single garment images.")
+            st.error("Try-on failed. Please try again with different images.")
+            st.info("Tips: full-body standing photo, outfit on plain background.")
+            st.caption(str(e))
 
-# ========================================
+        finally:
+            # Clean temp files
+            try:
+                if person_path and os.path.exists(person_path):
+                    os.remove(person_path)
+                if cloth_path and os.path.exists(cloth_path):
+                    os.remove(cloth_path)
+            except:
+                pass
+
+# ---------------------------
 # FOOTER
-# ========================================
+# ---------------------------
 st.markdown("---")
-st.caption("👗 Virtual try-on — fast preview mode")
+st.write("🔒 Photos are processed temporarily and automatically deleted.")
+st.write("🩷 Daily-wear fashion inspiration by TheCostumeHunt.com")
