@@ -4,6 +4,7 @@ import requests
 import os
 from PIL import Image
 import fal_client
+import traceback
 
 # ---------------------------
 # PAGE SETUP
@@ -29,37 +30,27 @@ except:
 if "free_used" not in st.session_state:
     st.session_state.free_used = False
 
-# ---------------------------
-# GET OUTFIT FROM BLOG LINK
-# ---------------------------
 query_params = st.query_params
 cloth_url = query_params.get("cloth", None)
 
-# ---------------------------
-# UI INPUTS
-# ---------------------------
 st.subheader("1. Upload your photo")
 user_image = st.file_uploader(
-    "Upload a clear, full-body photo (standing pose, good light works best)",
+    "Full-body photo (standing pose, good light)",
     type=["jpg", "jpeg", "png", "webp"]
 )
 
-st.subheader("2. Outfit image (full outfit: top + bottom / dress)")
-
+st.subheader("2. Outfit image (full outfit)")
 if cloth_url:
     try:
-        st.image(cloth_url, caption="Outfit selected from The Costume Hunt", width=260)
+        st.image(cloth_url, caption="Selected outfit", width=260)
     except:
         cloth_url = None
-        st.warning("Could not load outfit image. Please paste a direct image URL.")
+        st.warning("Could not load outfit image. Paste a direct image URL.")
 else:
-    cloth_url = st.text_input("Paste outfit image URL from thecostumehunt.com")
+    cloth_url = st.text_input("Paste outfit image URL")
 
 st.subheader("3. Generate try-on")
 
-# ---------------------------
-# HELPERS
-# ---------------------------
 def save_temp_image(file):
     img = Image.open(file).convert("RGB")
     temp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
@@ -68,7 +59,7 @@ def save_temp_image(file):
     return temp.name
 
 def download_image(url):
-    r = requests.get(url, stream=True, timeout=25)
+    r = requests.get(url, stream=True, timeout=30)
     r.raise_for_status()
     img = Image.open(r.raw).convert("RGB")
     temp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
@@ -76,51 +67,59 @@ def download_image(url):
     temp.close()
     return temp.name
 
-# ---------------------------
-# TRY-ON ACTION
-# ---------------------------
 if st.button("✨ Try it on"):
     if st.session_state.free_used:
-        st.warning("You've already used your free try-on. Unlimited try-ons coming soon.")
+        st.warning("Free try-on used. Try again later.")
         st.stop()
 
     if not user_image or not cloth_url:
-        st.warning("Please upload your photo and provide an outfit image.")
+        st.warning("Upload both your photo and an outfit image.")
         st.stop()
 
-    with st.spinner("Creating your virtual try-on… please wait 20–40 seconds"):
+    with st.spinner("Processing… please wait"):
         person_path = None
         cloth_path = None
 
         try:
-            # Prepare images
             person_path = save_temp_image(user_image)
             cloth_path = download_image(cloth_url)
 
-            # FAL Kolors Virtual Try-On
             result = fal_client.run(
                 "fal-ai/koloa-virtual-tryon",
                 arguments={
                     "human_image": open(person_path, "rb"),
                     "garment_image": open(cloth_path, "rb"),
-                    "category": "full",   # upper | lower | dress | full
-                    "mode": "quality"     # fast | quality
+                    "category": "full",
+                    "mode": "quality"
                 }
             )
 
-            output_url = result["image"]["url"]
+            # Show debug info
+            st.write("👉 Raw API response:", result)
 
-            st.image(output_url, caption="Your real virtual try-on", use_column_width=True)
-            st.success("🎉 Your try-on is ready!")
+            if "image" not in result or "url" not in result["image"]:
+                raise ValueError("Invalid result from FAL – no image URL")
+
+            output_url = result["image"]["url"]
+            st.image(output_url, caption="Your try-on result", use_column_width=True)
+            st.success("🎉 Try-on complete!")
             st.session_state.free_used = True
 
         except Exception as e:
-            st.error("Try-on failed. Please try again with different images.")
-            st.info("Tips: full-body standing photo, outfit on plain background.")
-            st.caption(str(e))
+            st.error("🚨 Try-on processing failed.")
+            st.write("**Error type:**", type(e).__name__)
+            st.write("**Error message:**", str(e))
+            st.write("**Traceback (debug):**")
+            st.text(traceback.format_exc())
+
+            st.info("""
+                **Tips for success:**
+                • Full body photo (head + feet visible)  
+                • Clear outfit image with plain background  
+                • Avoid text, logos, collages in outfit image
+            """)
 
         finally:
-            # Clean temp files
             try:
                 if person_path and os.path.exists(person_path):
                     os.remove(person_path)
@@ -129,9 +128,6 @@ if st.button("✨ Try it on"):
             except:
                 pass
 
-# ---------------------------
-# FOOTER
-# ---------------------------
 st.markdown("---")
-st.write("🔒 Photos are processed temporarily and automatically deleted.")
-st.write("🩷 Daily-wear fashion inspiration by TheCostumeHunt.com")
+st.write("🔒 Photos are processed temporarily and auto-deleted.")
+st.write("🩷 Daily inspiration by TheCostumeHunt.com")
