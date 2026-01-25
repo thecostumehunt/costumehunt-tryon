@@ -69,7 +69,6 @@ with col2:
 # ========================================
 
 def pad_to_square(img, bg_color=(255, 255, 255)):
-    """Pad image to square to stabilize proportions"""
     w, h = img.size
     s = max(w, h)
     new_img = Image.new("RGB", (s, s), bg_color)
@@ -77,21 +76,17 @@ def pad_to_square(img, bg_color=(255, 255, 255)):
     return new_img
 
 def normalize_image(image_data, max_side=1024):
-    """Resize proportionally + square pad to reduce garment drift"""
     if hasattr(image_data, "seek"):
         image_data.seek(0)
 
     img = Image.open(image_data).convert("RGB")
 
-    # Proportional resize
     w, h = img.size
     scale = max_side / max(w, h)
     if scale < 1:
         img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
 
-    # Square padding (important)
     img = pad_to_square(img)
-
     return img
 
 def image_to_base64(image_data):
@@ -102,13 +97,12 @@ def image_to_base64(image_data):
     return f"data:image/png;base64,{img_str}"
 
 # ========================================
-# AI TRY-ON BUTTON
+# AI TRY-ON
 # ========================================
 if st.button("✨ **GENERATE AI TRY-ON** ✨", type="primary", use_container_width=True):
 
     if st.session_state.used_free:
         st.error("🆓 **Free try used!** Refresh page for 1 more free try.")
-        st.markdown("### 🚀 **Unlimited Try-Ons Coming Soon**")
         st.stop()
 
     if not user_image:
@@ -119,7 +113,7 @@ if st.button("✨ **GENERATE AI TRY-ON** ✨", type="primary", use_container_wid
         st.error("👗 **Enter outfit image URL**")
         st.stop()
 
-    with st.spinner("🎨 **Preserving proportions & garment boundaries... 20–40s**"):
+    with st.spinner("🎨 **Preserving proportions & garment boundaries...**"):
         try:
             # Prepare images
             person_b64 = image_to_base64(user_image)
@@ -129,7 +123,7 @@ if st.button("✨ **GENERATE AI TRY-ON** ✨", type="primary", use_container_wid
             outfit_b64 = image_to_base64(io.BytesIO(outfit_response.content))
 
             # ====================================
-            # FAL API CALL (GARMENT-BIASED MODE)
+            # FAL API CALL
             # ====================================
             FAL_URL = "https://fal.run/fal-ai/idm-vton"
             headers = {
@@ -156,7 +150,7 @@ if st.button("✨ **GENERATE AI TRY-ON** ✨", type="primary", use_container_wid
             result = api_response.json()
 
             # ====================================
-            # EXTRACT RESULT (ROBUST)
+            # EXTRACT RESULT
             # ====================================
             output_image = None
 
@@ -189,17 +183,16 @@ if st.button("✨ **GENERATE AI TRY-ON** ✨", type="primary", use_container_wid
             if isinstance(output_image, str):
 
                 if output_image.startswith("http"):
-                    st.image(output_image, caption="✅ **YOUR AI TRY-ON RESULT**", use_column_width=True)
+                    st.image(output_image, caption="✅ YOUR AI TRY-ON RESULT", use_column_width=True)
                     image_bytes = requests.get(output_image).content
 
                 elif "base64" in output_image:
                     image_bytes = base64.b64decode(output_image.split(",")[-1])
                     result_img = Image.open(io.BytesIO(image_bytes))
-                    st.image(result_img, caption="✅ **YOUR AI TRY-ON RESULT**", use_column_width=True)
+                    st.image(result_img, caption="✅ YOUR AI TRY-ON RESULT", use_column_width=True)
 
                 else:
                     st.error("Unknown image format returned")
-                    st.write(output_image[:200])
                     st.stop()
 
             else:
@@ -209,12 +202,12 @@ if st.button("✨ **GENERATE AI TRY-ON** ✨", type="primary", use_container_wid
             # ====================================
             # SUCCESS UI
             # ====================================
-            st.success("🎉 **Try-on complete — proportions & garment length biased**")
-            st.balloons()
+            st.success("🎉 Try-on complete — garment boundaries biased")
 
             st.session_state.used_free = True
 
             col1, col2, col3 = st.columns(3)
+
             with col1:
                 if image_bytes:
                     st.download_button(
@@ -222,3 +215,23 @@ if st.button("✨ **GENERATE AI TRY-ON** ✨", type="primary", use_container_wid
                         data=image_bytes,
                         file_name="thecostumehunt-tryon.png",
                         mime="image/png"
+                    )
+
+            with col2:
+                if st.button("🔄 New Try-On", use_container_width=True):
+                    st.rerun()
+
+            with col3:
+                st.success("📱 Pinterest ready!")
+
+            st.markdown("**✨ Share your result on Pinterest!**")
+
+        except Exception as e:
+            st.error(f"❌ Error: {str(e)[:150]}")
+            st.info("Use full body photos, plain background, single garment images.")
+
+# ========================================
+# FOOTER
+# ========================================
+st.markdown("---")
+st.caption("👗 Virtual try-on — fast preview mode")
