@@ -68,7 +68,7 @@ if st.button("✨ Try it on"):
         st.warning("Please upload your photo and provide an outfit image.")
         st.stop()
 
-    with st.spinner("Creating your try-on… please wait 10–30 seconds"):
+    with st.spinner("Creating your try-on… please wait 30-60 seconds"):
         person_path = None
         cloth_path = None
 
@@ -77,20 +77,24 @@ if st.button("✨ Try it on"):
             person_path = save_temp_image(user_image)
             cloth_path = download_image(cloth_url)
 
-            # Run virtual try-on model
+            # Run FREE virtual try-on model
             with open(person_path, "rb") as person_file, open(cloth_path, "rb") as cloth_file:
                 output = replicate.run(
-                    "cuuupid/idm-vton:c871bb9b046607b680449ecbae55fd8c6d945e0a1948644bf2361b3d021d3ff4",
+                    "zsxkib/virtual-try-on",
                     input={
-                        "human_img": person_file,
-                        "garm_img": cloth_file,
-                        "garment_des": "daily wear outfit"
+                        "person_image": person_file,
+                        "garment_image": cloth_file,
+                        "n_steps": 20,
+                        "n_samples": 1,
+                        "guidance_scale": 2.0,
+                        "seed": 42
                     }
                 )
 
             # Display result
             if output:
-                if isinstance(output, list):
+                # This model returns a list of image URLs
+                if isinstance(output, list) and len(output) > 0:
                     st.image(output[0], caption="Your try-on result", use_column_width=True)
                 else:
                     st.image(output, caption="Your try-on result", use_column_width=True)
@@ -102,7 +106,7 @@ if st.button("✨ Try it on"):
 
         except replicate.exceptions.ReplicateError as e:
             st.error(f"AI model error: {str(e)}")
-            st.info("Try using a different model or check if your API key is valid.")
+            st.info("The model may be temporarily unavailable. Please try again in a few minutes.")
             
         except requests.exceptions.RequestException as e:
             st.error(f"Error downloading outfit image: {str(e)}")
