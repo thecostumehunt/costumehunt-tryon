@@ -39,7 +39,7 @@ st.subheader("📸 1. Upload Your Photo")
 user_image = st.file_uploader(
     "Upload **FULL BODY** photo (standing works best)",
     type=["jpg", "jpeg", "png", "webp"],
-    help="Plain background + good lighting = best AI results"
+    help="Plain background + full torso visible = best AI results"
 )
 
 # ========================================
@@ -62,23 +62,40 @@ with col1:
         )
 
 with col2:
-    st.info("💡 **Best Results:**\n• Single garment\n• Front-facing\n• Plain background")
+    st.info("💡 **Best Results:**\n• Single garment\n• Front-facing\n• Full top visible\n• Plain background")
 
 # ========================================
-# HELPER FUNCTIONS
+# IMAGE HELPERS
 # ========================================
-def image_to_base64(image_data, max_side=1024):
-    """Convert image to base64 PNG, keep proportions, reduce hallucination"""
-    if hasattr(image_data, 'seek'):
+
+def pad_to_square(img, bg_color=(255, 255, 255)):
+    """Pad image to square to stabilize proportions"""
+    w, h = img.size
+    s = max(w, h)
+    new_img = Image.new("RGB", (s, s), bg_color)
+    new_img.paste(img, ((s - w) // 2, (s - h) // 2))
+    return new_img
+
+def normalize_image(image_data, max_side=1024):
+    """Resize proportionally + square pad to reduce garment drift"""
+    if hasattr(image_data, "seek"):
         image_data.seek(0)
 
     img = Image.open(image_data).convert("RGB")
-    w, h = img.size
 
+    # Proportional resize
+    w, h = img.size
     scale = max_side / max(w, h)
     if scale < 1:
         img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
 
+    # Square padding (important)
+    img = pad_to_square(img)
+
+    return img
+
+def image_to_base64(image_data):
+    img = normalize_image(image_data)
     buffer = io.BytesIO()
     img.save(buffer, format="PNG", optimize=True)
     img_str = base64.b64encode(buffer.getvalue()).decode()
@@ -102,10 +119,7 @@ if st.button("✨ **GENERATE AI TRY-ON** ✨", type="primary", use_container_wid
         st.error("👗 **Enter outfit image URL**")
         st.stop()
 
-    # ========================================
-    # AI PROCESSING
-    # ========================================
-    with st.spinner("🎨 **Preserving body, face, and clothing details... 20–40s**"):
+    with st.spinner("🎨 **Preserving proportions & garment boundaries... 20–40s**"):
         try:
             # Prepare images
             person_b64 = image_to_base64(user_image)
@@ -115,7 +129,7 @@ if st.button("✨ **GENERATE AI TRY-ON** ✨", type="primary", use_container_wid
             outfit_b64 = image_to_base64(io.BytesIO(outfit_response.content))
 
             # ====================================
-            # FAL API CALL (FIDELITY MODE)
+            # FAL API CALL (GARMENT-BIASED MODE)
             # ====================================
             FAL_URL = "https://fal.run/fal-ai/idm-vton"
             headers = {
@@ -127,10 +141,13 @@ if st.button("✨ **GENERATE AI TRY-ON** ✨", type="primary", use_container_wid
                 "human_image_url": person_b64,
                 "garment_image_url": outfit_b64,
                 "description": (
-                    "same person, same face, same body shape, preserve identity, "
-                    "preserve pose, preserve proportions, exact clothing transfer, "
-                    "copy garment exactly from reference image, realistic try-on, "
-                    "do not stylize, do not beautify, no body reshaping, no face change"
+                    "same person, preserve identity and pose, preserve body proportions, "
+                    "transfer the exact garment from the reference image, "
+                    "top length must match the reference garment, "
+                    "hemline position must stay consistent, "
+                    "do not crop the top, do not extend the top, "
+                    "sleeve length must match the reference, "
+                    "realistic try-on, no stylization, no beautification, no body reshaping"
                 )
             }
 
@@ -192,7 +209,7 @@ if st.button("✨ **GENERATE AI TRY-ON** ✨", type="primary", use_container_wid
             # ====================================
             # SUCCESS UI
             # ====================================
-            st.success("🎉 **Try-on complete – identity & proportions preserved**")
+            st.success("🎉 **Try-on complete — proportions & garment length biased**")
             st.balloons()
 
             st.session_state.used_free = True
@@ -205,48 +222,3 @@ if st.button("✨ **GENERATE AI TRY-ON** ✨", type="primary", use_container_wid
                         data=image_bytes,
                         file_name="thecostumehunt-tryon.png",
                         mime="image/png"
-                    )
-            with col2:
-                if st.button("🔄 New Try-On", use_container_width=True):
-                    st.rerun()
-            with col3:
-                st.success("📱 Pinterest ready!")
-
-            st.markdown("**✨ Share your result on Pinterest!**")
-
-        except requests.exceptions.RequestException as e:
-            st.error(f"🌐 Network error: {str(e)}")
-
-        except Exception as e:
-            st.error(f"❌ AI Error: {str(e)[:150]}...")
-            st.info("""
-            **🔧 Quality tips**
-            • Full body, standing, neutral pose  
-            • Plain background  
-            • Single garment only  
-            • Front-facing clothing images  
-            """)
-
-# ========================================
-# FOOTER
-# ========================================
-st.markdown("---")
-col1, col2 = st.columns([1, 1])
-
-with col1:
-    st.markdown("""
-    **🔒 Privacy Guaranteed**
-    - No storage  
-    - No database  
-    - In-memory processing  
-    """)
-
-with col2:
-    st.markdown("""
-    **🚀 Powered By**
-    - Fal.ai IDM-VTON  
-    - Real clothing transfer  
-    - TheCostumeHunt.com  
-    """)
-
-st.caption("👗 Virtual try-on powered by real AI")
