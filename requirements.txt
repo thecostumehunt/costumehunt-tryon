@@ -1,3 +1,6 @@
 streamlit
 pillow
 requests
+replicate
+rembg
+opencv-python-headless
