@@ -3,14 +3,11 @@ import requests
 import io
 from PIL import Image
 import base64
-import os
 
 # Setup
 st.set_page_config(page_title="The Costume Hunt – Try On", layout="centered")
-os.environ["FAL_KEY"] = st.secrets["FAL_KEY"]
-
 st.title("👗 Virtual Try-On")
-st.caption("Real AI clothing transfer - TheCostumeHunt.com")
+st.caption("Real AI clothing transfer")
 
 if "used" not in st.session_state:
     st.session_state.used = False
@@ -20,43 +17,36 @@ st.subheader("1. Your Photo")
 user_image = st.file_uploader("Full-body photo", type=["jpg", "png", "webp"])
 
 st.subheader("2. Outfit Image")
-cloth_url = st.text_input("Outfit URL")
+cloth_url = st.text_input("Outfit URL from thecostumehunt.com")
 
-# FIXED: Convert images to base64 (JSON serializable)
+# Convert image to base64
 def image_to_base64(image_data):
-    """Convert PIL image or bytes to base64"""
-    if hasattr(image_data, 'read'):  # File-like object
-        image_data.seek(0)
-        img = Image.open(image_data).convert("RGB")
-    else:  # Uploaded file
-        img = Image.open(image_data).convert("RGB")
-    
+    img = Image.open(image_data).convert("RGB")
     buffer = io.BytesIO()
     img.save(buffer, format="PNG")
-    img_str = base64.b64encode(buffer.getvalue()).decode()
-    return img_str
+    return base64.b64encode(buffer.getvalue()).decode()
 
-# MAIN TRY-ON BUTTON
+# MAIN TRY-ON
 if st.button("✨ AI Virtual Try-On ✨", type="primary"):
     if st.session_state.used:
-        st.error("🆓 Free try used! Refresh for more.")
+        st.error("Free try used! Refresh page.")
         st.stop()
     
     if not user_image or not cloth_url:
-        st.error("📸 Photo + 👗 Outfit URL required")
+        st.error("Upload photo + enter outfit URL")
         st.stop()
     
-    with st.spinner("🎨 Real AI clothing transfer (20-40s)..."):
+    with st.spinner("🎨 AI processing (20-40s)..."):
         try:
-            # ✅ FIXED: Convert to base64 - NO file objects
+            # Convert images to base64
             person_b64 = image_to_base64(user_image)
             
-            # Download outfit as base64
-            outfit_response = requests.get(cloth_url, timeout=15)
-            outfit_b64 = image_to_base64(io.BytesIO(outfit_response.content))
+            # Download outfit
+            outfit_resp = requests.get(cloth_url, timeout=15)
+            outfit_b64 = image_to_base64(io.BytesIO(outfit_resp.content))
             
-            # ✅ HTTP API CALL - JSON SERIALIZABLE
-            FAL_URL = "https://fal.run/fal-ai/tryon-v1.5"
+            # ✅ FIXED: Correct Fal.ai VTON endpoint + response handling
+            FAL_URL = "https://fal.run/fal-ai/idm-vton"
             headers = {
                 "Authorization": f"Key {st.secrets['FAL_KEY']}",
                 "Content-Type": "application/json"
@@ -65,30 +55,52 @@ if st.button("✨ AI Virtual Try-On ✨", type="primary"):
             payload = {
                 "input": {
                     "person_image": person_b64,
-                    "garment_image": outfit_b64
+                    "garment_image": outfit_b64,
+                    "person_image_format": "base64",
+                    "garment_image_format": "base64"
                 }
             }
             
             response = requests.post(FAL_URL, json=payload, headers=headers)
             result = response.json()
             
+            # ✅ FIXED: Handle ALL response formats
+            output_image = None
+            
+            # Try different response structures
+            if "images" in result and len(result["images"]) > 0:
+                output_image = result["images"][0]
+            elif "image" in result:
+                output_image = result["image"]
+            elif "output" in result:
+                output_image = result["output"]
+            elif isinstance(result, list) and len(result) > 0:
+                output_image = result[0]
+            else:
+                st.error("Unexpected API response format")
+                st.json(result)  # Debug
+                st.stop()
+            
             # Display result
-            result_image = Image.open(io.BytesIO(base64.b64decode(result["images"][0])))
-            st.image(result_image, caption="✅ Your AI Try-On!", use_column_width=True)
+            if output_image.startswith("http"):
+                st.image(output_image, caption="✅ Your AI Try-On!", use_column_width=True)
+            else:  # base64
+                img_data = base64.b64decode(output_image)
+                result_img = Image.open(io.BytesIO(img_data))
+                st.image(result_img, caption="✅ Your AI Try-On!", use_column_width=True)
+            
             st.success("🎉 Real clothing transfer complete!")
             st.balloons()
             st.session_state.used = True
             
-            # Download
-            st.download_button("💾 Save Result", 
-                             data=result["images"][0], 
-                             file_name="tryon-result.png",
-                             mime="image/png")
+            # Download (base64 version)
+            st.download_button("💾 Download", 
+                             data=base64.b64decode(output_image), 
+                             file_name="tryon-result.png")
             
         except Exception as e:
-            st.error(f"❌ Error: {str(e)[:120]}")
-            st.info("💡 Full-body photos + single garments work best")
+            st.error(f"❌ Error: {str(e)}")
+            st.info("💡 Try: full-body photos + single garment images")
 
-# Footer
 st.markdown("---")
-st.caption("🔒 Photos processed in memory • TheCostumeHunt.com")
+st.caption("🔒 Photos never stored • TheCostumeHunt.com")
