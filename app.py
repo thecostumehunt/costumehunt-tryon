@@ -72,6 +72,7 @@ st.subheader("3. Generate try-on")
 # HELPERS
 # ----------------------------------
 def save_temp_image(file):
+    """Save uploaded file to temporary location"""
     img = Image.open(file).convert("RGB")
     temp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
     img.save(temp.name, format="PNG")
@@ -79,6 +80,7 @@ def save_temp_image(file):
     return temp.name
 
 def download_image(url):
+    """Download image from URL and save to temporary location"""
     r = requests.get(url, stream=True, timeout=30)
     r.raise_for_status()
     img = Image.open(r.raw).convert("RGB")
@@ -88,9 +90,10 @@ def download_image(url):
     return temp.name
 
 # ----------------------------------
-# WESHOP VIRTUAL TRY-ON
+# WESHOP VIRTUAL TRY-ON WITH RETRY LOGIC
 # ----------------------------------
 def create_virtualtryon_task(person_url, cloth_url):
+    """Create a virtual try-on task"""
     url = f"{WESHOP_BASE}/task/create"
 
     payload = {
@@ -108,7 +111,8 @@ def create_virtualtryon_task(person_url, cloth_url):
     r.raise_for_status()
     return r.json()["data"]["taskId"]
 
-def execute_virtualtryon(task_id):
+def execute_virtualtryon_with_retry(task_id, max_retries=3):
+    """Execute virtual try-on task with retry logic for server errors"""
     url = f"{WESHOP_BASE}/task/execute"
 
     payload = {
@@ -125,14 +129,45 @@ def execute_virtualtryon(task_id):
         }
     }
 
-    r = requests.post(url, headers=WESHOP_HEADERS, json=payload, timeout=60)
-
-    if r.status_code != 200:
-        raise Exception(f"{r.status_code} - {r.text}")
-
-    return r.json()["data"]["executionId"]
+    for attempt in range(max_retries):
+        try:
+            r = requests.post(url, headers=WESHOP_HEADERS, json=payload, timeout=60)
+            
+            # Handle 500 errors with code 50004 (system issues)
+            if r.status_code == 500:
+                try:
+                    error_data = r.json()
+                    if error_data.get("code") == "50004":
+                        if attempt < max_retries - 1:
+                            wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+                            st.warning(f"⏳ Server is busy. Retrying in {wait_time} seconds... (Attempt {attempt + 1}/{max_retries})")
+                            time.sleep(wait_time)
+                            continue
+                        else:
+                            raise Exception(
+                                "WeShop API is temporarily experiencing high load. "
+                                "Please try again in 2-3 minutes."
+                            )
+                except:
+                    pass
+            
+            # Raise for other HTTP errors
+            r.raise_for_status()
+            return r.json()["data"]["executionId"]
+            
+        except requests.exceptions.RequestException as e:
+            if attempt < max_retries - 1:
+                wait_time = 2 ** attempt
+                st.warning(f"⏳ Connection issue. Retrying in {wait_time} seconds... (Attempt {attempt + 1}/{max_retries})")
+                time.sleep(wait_time)
+                continue
+            else:
+                raise Exception(f"Failed after {max_retries} attempts: {str(e)}")
+    
+    raise Exception("Unexpected error in retry logic")
 
 def query_task(execution_id):
+    """Query task status"""
     url = f"{WESHOP_BASE}/task/query"
     payload = {"executionId": execution_id}
     r = requests.post(url, headers=WESHOP_HEADERS, json=payload, timeout=30)
@@ -140,6 +175,7 @@ def query_task(execution_id):
     return r.json()
 
 def wait_for_result(execution_id, timeout=240):
+    """Wait for task completion and return result"""
     start = time.time()
 
     while True:
@@ -154,10 +190,11 @@ def wait_for_result(execution_id, timeout=240):
                 return latest["results"][0]["image"]
 
             if status == "Failed":
-                raise Exception(latest["results"][0].get("error", "Try-on failed"))
+                error_msg = latest["results"][0].get("error", "Try-on failed")
+                raise Exception(error_msg)
 
         if time.time() - start > timeout:
-            raise Exception("Try-on timed out")
+            raise Exception("Try-on timed out after 4 minutes. Please try again.")
 
         time.sleep(4)
 
@@ -167,7 +204,7 @@ def wait_for_result(execution_id, timeout=240):
 if st.button("✨ Try it on"):
 
     if not user_image or (not cloth_url and not cloth_file):
-        st.warning("Please upload your photo and provide an outfit.")
+        st.warning("⚠️ Please upload your photo and provide an outfit image.")
         st.stop()
 
     with st.spinner("Creating your virtual try-on… please wait"):
@@ -175,6 +212,7 @@ if st.button("✨ Try it on"):
         cloth_path = None
 
         try:
+            # Save images locally
             person_path = save_temp_image(user_image)
 
             if cloth_url:
@@ -182,24 +220,46 @@ if st.button("✨ Try it on"):
             else:
                 cloth_path = save_temp_image(cloth_file)
 
-            # Upload to public CDN (required)
+            # Upload to public CDN (required by WeShop API)
             person_url = fal_client.upload_file(person_path)
             outfit_url = fal_client.upload_file(cloth_path)
 
-            # WeShop pipeline
+            # WeShop pipeline with retry logic
             task_id = create_virtualtryon_task(person_url, outfit_url)
-            execution_id = execute_virtualtryon(task_id)
+            execution_id = execute_virtualtryon_with_retry(task_id)
             output_url = wait_for_result(execution_id)
 
+            # Display result
             st.image(output_url, caption="Your virtual try-on", use_column_width=True)
             st.success("🎉 Your try-on is ready!")
+            
+            # Optional: Add download button
+            st.download_button(
+                label="💾 Download Result",
+                data=requests.get(output_url).content,
+                file_name="virtual_tryon_result.png",
+                mime="image/png"
+            )
 
         except Exception as e:
-            st.error("🚨 Try-on failed.")
-            st.write(str(e))
-            st.text(traceback.format_exc())
+            error_str = str(e)
+            
+            # Handle specific error types
+            if "50004" in error_str or "high load" in error_str or "temporarily" in error_str:
+                st.error("🚨 The virtual try-on service is temporarily busy.")
+                st.info("💡 This usually resolves in a few minutes. Please try again shortly.")
+                st.caption("If the problem persists, contact support at: hi@weshop.ai")
+            elif "timed out" in error_str:
+                st.error("🚨 The request took too long to process.")
+                st.info("💡 Please try again with a smaller image or wait a moment.")
+            else:
+                st.error("🚨 Try-on failed.")
+                st.write(error_str)
+                with st.expander("Show technical details"):
+                    st.text(traceback.format_exc())
 
         finally:
+            # Cleanup temporary files
             try:
                 if person_path and os.path.exists(person_path):
                     os.remove(person_path)
@@ -214,3 +274,4 @@ if st.button("✨ Try it on"):
 st.markdown("---")
 st.write("🔒 Images are automatically deleted after processing.")
 st.write("🩷 Daily-wear inspiration by TheCostumeHunt.com")
+st.caption("Note: Processing may take 30-60 seconds. Please be patient!")
