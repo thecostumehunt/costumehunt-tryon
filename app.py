@@ -26,7 +26,7 @@ except:
     st.error("Please set FAL_KEY and WESHOP_API_KEY in Streamlit secrets.")
     st.stop()
 
-WESHOP_BASE = "https://openapi.weshop.ai/openapi/v1"
+WESHOP_BASE = "https://openapi.weshop.ai/openapi/v1/agent"
 WESHOP_HEADERS = {
     "Authorization": WESHOP_API_KEY,
     "Content-Type": "application/json"
@@ -97,9 +97,11 @@ def download_image(url):
 # WESHOP API
 # ----------------------------------
 def create_virtual_tryon_task(person_url, cloth_url):
-    url = f"{WESHOP_BASE}/agent/virtualtryon/create"
+    url = f"{WESHOP_BASE}/task/create"
 
     payload = {
+        "agentName": "virtualtryon",
+        "agentVersion": "v1.0",
         "initParams": {
             "taskName": "Virtual Try On",
             "originalImage": person_url,
@@ -113,7 +115,7 @@ def create_virtual_tryon_task(person_url, cloth_url):
     return r.json()["data"]["taskId"]
 
 def execute_virtual_tryon(task_id):
-    url = f"{WESHOP_BASE}/agent/virtualtryon/execute"
+    url = f"{WESHOP_BASE}/task/execute"
 
     payload = {
         "taskId": task_id,
@@ -134,7 +136,7 @@ def execute_virtual_tryon(task_id):
     return r.json()["data"]["executionId"]
 
 def query_execution(execution_id):
-    url = f"{WESHOP_BASE}/agent/virtualtryon/queryTask"
+    url = f"{WESHOP_BASE}/task/queryTask"
     payload = {"executionId": execution_id}
     r = requests.post(url, headers=WESHOP_HEADERS, json=payload, timeout=30)
     r.raise_for_status()
@@ -142,9 +144,11 @@ def query_execution(execution_id):
 
 def wait_for_result(execution_id, timeout=240):
     start = time.time()
+
     while True:
         data = query_execution(execution_id)
         executions = data.get("executions", [])
+
         if executions:
             latest = executions[0]
             status = latest["status"]
@@ -184,7 +188,7 @@ if st.button("✨ Try it on"):
             else:
                 cloth_path = save_temp_image(cloth_file)
 
-            # Upload to public CDN
+            # Upload to public CDN (for WeShop)
             person_url = fal_client.upload_file(person_path)
             outfit_url = fal_client.upload_file(cloth_path)
 
@@ -223,4 +227,3 @@ Best results:
 st.markdown("---")
 st.write("🔒 Images are automatically deleted after processing.")
 st.write("🩷 Daily-wear inspiration by TheCostumeHunt.com")
-
