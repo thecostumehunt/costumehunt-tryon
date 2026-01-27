@@ -43,7 +43,7 @@ if "free_used" not in st.session_state:
 # ----------------------------------
 st.subheader("1. Upload your photo")
 user_image = st.file_uploader(
-    "Upload a clear, full-body photo (standing pose is best)",
+    "Upload a clear, front-facing full-body photo",
     type=["jpg", "jpeg", "png", "webp"]
 )
 
@@ -94,7 +94,7 @@ def download_image(url):
     return temp.name
 
 # ----------------------------------
-# WESHOP API
+# WESHOP API FUNCTIONS
 # ----------------------------------
 def create_virtual_tryon_task(person_url, cloth_url):
     url = f"{WESHOP_BASE}/task/create"
@@ -104,7 +104,7 @@ def create_virtual_tryon_task(person_url, cloth_url):
         "agentVersion": "v1.0",
         "initParams": {
             "taskName": "Virtual Try On",
-            "originalImage": person_url,
+            "originalImage": cloth_url,
             "fashionModelImage": person_url,
             "locationImage": cloth_url
         }
@@ -120,19 +120,22 @@ def execute_virtual_tryon(task_id):
     payload = {
         "taskId": task_id,
         "params": {
-            "generateVersion": "weshopPro",
+            "generateVersion": "weshopFlash",
             "descriptionType": "custom",
             "textDescription": (
-                "Replace the clothes of the person with the clothes from the reference image. "
-                "Keep the same face, skin tone, hairstyle, body shape and identity. "
-                "Only change the clothing. Make it realistic and natural."
+                "Replace the clothes of the person with the clothes from the product image. "
+                "Keep the same face, hairstyle, body shape, and identity. "
+                "Only change the clothing. Make it realistic."
             ),
             "batchCount": 1
         }
     }
 
     r = requests.post(url, headers=WESHOP_HEADERS, json=payload, timeout=60)
-    r.raise_for_status()
+
+    if r.status_code != 200:
+        raise Exception(f"{r.status_code} - {r.text}")
+
     return r.json()["data"]["executionId"]
 
 def query_execution(execution_id):
@@ -165,7 +168,7 @@ def wait_for_result(execution_id, timeout=240):
         time.sleep(4)
 
 # ----------------------------------
-# TRY-ON
+# TRY-ON BUTTON
 # ----------------------------------
 if st.button("✨ Try it on"):
     if st.session_state.free_used:
@@ -176,7 +179,7 @@ if st.button("✨ Try it on"):
         st.warning("Please upload your photo and provide an outfit.")
         st.stop()
 
-    with st.spinner("Creating your virtual try-on… please wait 30–90 seconds"):
+    with st.spinner("Creating your virtual try-on… please wait"):
         person_path = None
         cloth_path = None
 
@@ -188,7 +191,7 @@ if st.button("✨ Try it on"):
             else:
                 cloth_path = save_temp_image(cloth_file)
 
-            # Upload to public CDN (for WeShop)
+            # Upload to public CDN (required by WeShop)
             person_url = fal_client.upload_file(person_path)
             outfit_url = fal_client.upload_file(cloth_path)
 
@@ -209,7 +212,8 @@ if st.button("✨ Try it on"):
 Best results:
 • Full-body standing photo  
 • Clear outfit image  
-• Avoid group photos and collages
+• Plain background  
+• No group photos
 """)
 
         finally:
