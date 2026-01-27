@@ -2,6 +2,7 @@ import streamlit as st
 import tempfile
 import requests
 import os
+import time
 from PIL import Image
 import fal_client
 import traceback
@@ -9,20 +10,27 @@ import traceback
 # ----------------------------------
 # PAGE SETUP
 # ----------------------------------
-st.set_page_config(page_title="The Costume Hunt – Try On", layout="centered")
+st.set_page_config(page_title="The Costume Hunt – Virtual Try On", layout="centered")
 
 st.title("👗 Try This Outfit On Yourself")
-st.write("Upload your full-body photo and preview how a full outfit looks on you.")
-st.caption("Powered by TheCostumeHunt.com • Photos are processed temporarily and deleted.")
+st.write("Upload your photo and see how an outfit looks on you.")
+st.caption("Powered by TheCostumeHunt.com • Images are processed temporarily.")
 
 # ----------------------------------
-# API KEY
+# API KEYS
 # ----------------------------------
 try:
     os.environ["FAL_KEY"] = st.secrets["FAL_KEY"]
+    WESHOP_API_KEY = st.secrets["WESHOP_API_KEY"]
 except:
-    st.error("Please set FAL_KEY in Streamlit Secrets")
+    st.error("Please set FAL_KEY and WESHOP_API_KEY in Streamlit secrets.")
     st.stop()
+
+WESHOP_BASE = "https://openapi.weshop.ai/openapi/v1"
+WESHOP_HEADERS = {
+    "Authorization": WESHOP_API_KEY,
+    "Content-Type": "application/json"
+}
 
 # ----------------------------------
 # SESSION CONTROL
@@ -30,28 +38,39 @@ except:
 if "free_used" not in st.session_state:
     st.session_state.free_used = False
 
-query_params = st.query_params
-cloth_url = query_params.get("cloth", None)
-
 # ----------------------------------
 # UI
 # ----------------------------------
 st.subheader("1. Upload your photo")
 user_image = st.file_uploader(
-    "Upload a clear, full-body photo (standing pose, head to feet visible)",
+    "Upload a clear, full-body photo (standing pose is best)",
     type=["jpg", "jpeg", "png", "webp"]
 )
 
-st.subheader("2. Outfit image (full outfit or dress)")
+st.subheader("2. Outfit image")
+
+cloth_source = st.radio(
+    "Choose outfit source:",
+    ["Paste image URL", "Upload image"],
+    horizontal=True
+)
+
+cloth_url = None
+cloth_file = None
+
+if cloth_source == "Paste image URL":
+    cloth_url = st.text_input("Paste direct outfit image URL")
+else:
+    cloth_file = st.file_uploader(
+        "Upload outfit image",
+        type=["jpg", "jpeg", "png", "webp"]
+    )
 
 if cloth_url:
-    try:
-        st.image(cloth_url, caption="Selected outfit", width=260)
-    except:
-        cloth_url = None
-        st.warning("Could not load image. Please paste a direct image URL.")
-else:
-    cloth_url = st.text_input("Paste outfit image URL")
+    st.image(cloth_url, caption="Selected outfit", width=260)
+
+if cloth_file:
+    st.image(cloth_file, caption="Uploaded outfit", width=260)
 
 st.subheader("3. Generate try-on")
 
@@ -75,6 +94,73 @@ def download_image(url):
     return temp.name
 
 # ----------------------------------
+# WESHOP API
+# ----------------------------------
+def create_virtual_tryon_task(person_url, cloth_url):
+    url = f"{WESHOP_BASE}/agent/virtualtryon/create"
+
+    payload = {
+        "initParams": {
+            "taskName": "Virtual Try On",
+            "originalImage": person_url,
+            "fashionModelImage": person_url,
+            "locationImage": cloth_url
+        }
+    }
+
+    r = requests.post(url, headers=WESHOP_HEADERS, json=payload, timeout=60)
+    r.raise_for_status()
+    return r.json()["data"]["taskId"]
+
+def execute_virtual_tryon(task_id):
+    url = f"{WESHOP_BASE}/agent/virtualtryon/execute"
+
+    payload = {
+        "taskId": task_id,
+        "params": {
+            "generateVersion": "weshopPro",
+            "descriptionType": "custom",
+            "textDescription": (
+                "Replace the clothes of the person with the clothes from the reference image. "
+                "Keep the same face, skin tone, hairstyle, body shape and identity. "
+                "Only change the clothing. Make it realistic and natural."
+            ),
+            "batchCount": 1
+        }
+    }
+
+    r = requests.post(url, headers=WESHOP_HEADERS, json=payload, timeout=60)
+    r.raise_for_status()
+    return r.json()["data"]["executionId"]
+
+def query_execution(execution_id):
+    url = f"{WESHOP_BASE}/agent/virtualtryon/queryTask"
+    payload = {"executionId": execution_id}
+    r = requests.post(url, headers=WESHOP_HEADERS, json=payload, timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+def wait_for_result(execution_id, timeout=240):
+    start = time.time()
+    while True:
+        data = query_execution(execution_id)
+        executions = data.get("executions", [])
+        if executions:
+            latest = executions[0]
+            status = latest["status"]
+
+            if status == "Success":
+                return latest["results"][0]["image"]
+
+            if status == "Failed":
+                raise Exception(latest["results"][0].get("error", "Try-on failed"))
+
+        if time.time() - start > timeout:
+            raise Exception("Try-on timed out")
+
+        time.sleep(4)
+
+# ----------------------------------
 # TRY-ON
 # ----------------------------------
 if st.button("✨ Try it on"):
@@ -82,44 +168,32 @@ if st.button("✨ Try it on"):
         st.warning("You've already used your free try-on.")
         st.stop()
 
-    if not user_image or not cloth_url:
-        st.warning("Please upload your photo and provide an outfit image.")
+    if not user_image or (not cloth_url and not cloth_file):
+        st.warning("Please upload your photo and provide an outfit.")
         st.stop()
 
-    with st.spinner("Creating your virtual try-on… please wait 30–60 seconds"):
+    with st.spinner("Creating your virtual try-on… please wait 30–90 seconds"):
         person_path = None
         cloth_path = None
 
         try:
-            # Save images
             person_path = save_temp_image(user_image)
-            cloth_path = download_image(cloth_url)
 
-            # Upload to FAL CDN
-            person_url = fal_client.upload_file(person_path)
-            garment_url = fal_client.upload_file(cloth_path)
-
-            # ✅ Official queue-based Kolors call (your version returns dict directly)
-            result = fal_client.subscribe(
-                "fal-ai/kling/v1-5/kolors-virtual-try-on",
-                arguments={
-                    "human_image_url": person_url,
-                    "garment_image_url": garment_url
-                },
-                with_logs=True
-            )
-
-            # Extract output
-            if "image_url" in result:
-                output_url = result["image_url"]
-            elif "data" in result and "image_url" in result["data"]:
-                output_url = result["data"]["image_url"]
-            elif "image" in result and "url" in result["image"]:
-                output_url = result["image"]["url"]
+            if cloth_url:
+                cloth_path = download_image(cloth_url)
             else:
-                raise ValueError("No output image found in FAL response")
+                cloth_path = save_temp_image(cloth_file)
 
-            st.image(output_url, caption="Your real virtual try-on", use_column_width=True)
+            # Upload to public CDN
+            person_url = fal_client.upload_file(person_path)
+            outfit_url = fal_client.upload_file(cloth_path)
+
+            # WeShop pipeline
+            task_id = create_virtual_tryon_task(person_url, outfit_url)
+            execution_id = execute_virtual_tryon(task_id)
+            output_url = wait_for_result(execution_id)
+
+            st.image(output_url, caption="Your virtual try-on", use_column_width=True)
             st.success("🎉 Your try-on is ready!")
             st.session_state.free_used = True
 
@@ -130,8 +204,8 @@ if st.button("✨ Try it on"):
             st.info("""
 Best results:
 • Full-body standing photo  
-• Outfit image on plain background  
-• Avoid collages or screenshots
+• Clear outfit image  
+• Avoid group photos and collages
 """)
 
         finally:
@@ -147,5 +221,6 @@ Best results:
 # FOOTER
 # ----------------------------------
 st.markdown("---")
-st.write("🔒 Photos are automatically deleted after processing.")
+st.write("🔒 Images are automatically deleted after processing.")
 st.write("🩷 Daily-wear inspiration by TheCostumeHunt.com")
+
