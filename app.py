@@ -133,7 +133,7 @@ def execute_virtualtryon(task_id):
     return r.json()["data"]["executionId"]
 
 def query_task(execution_id):
-    url = f"{WESHOP_BASE}/task/queryTask"
+    url = f"{WESHOP_BASE}/task/query"
     payload = {"executionId": execution_id}
     r = requests.post(url, headers=WESHOP_HEADERS, json=payload, timeout=30)
     r.raise_for_status()
