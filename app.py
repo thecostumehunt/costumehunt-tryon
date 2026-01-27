@@ -33,12 +33,6 @@ WESHOP_HEADERS = {
 }
 
 # ----------------------------------
-# SESSION CONTROL
-# ----------------------------------
-if "free_used" not in st.session_state:
-    st.session_state.free_used = False
-
-# ----------------------------------
 # UI
 # ----------------------------------
 st.subheader("1. Upload your photo")
@@ -94,9 +88,9 @@ def download_image(url):
     return temp.name
 
 # ----------------------------------
-# WESHOP API FUNCTIONS
+# WESHOP VIRTUAL TRY-ON
 # ----------------------------------
-def create_virtual_tryon_task(person_url, cloth_url):
+def create_virtualtryon_task(person_url, cloth_url):
     url = f"{WESHOP_BASE}/task/create"
 
     payload = {
@@ -114,7 +108,7 @@ def create_virtual_tryon_task(person_url, cloth_url):
     r.raise_for_status()
     return r.json()["data"]["taskId"]
 
-def execute_virtual_tryon(task_id):
+def execute_virtualtryon(task_id):
     url = f"{WESHOP_BASE}/task/execute"
 
     payload = {
@@ -124,7 +118,7 @@ def execute_virtual_tryon(task_id):
             "descriptionType": "custom",
             "textDescription": (
                 "Replace the clothes of the person with the clothes from the product image. "
-                "Keep the same face, hairstyle, body shape, and identity. "
+                "Keep the same face, skin tone, hairstyle, body shape, and identity. "
                 "Only change the clothing. Make it realistic."
             ),
             "batchCount": 1
@@ -138,7 +132,7 @@ def execute_virtual_tryon(task_id):
 
     return r.json()["data"]["executionId"]
 
-def query_execution(execution_id):
+def query_task(execution_id):
     url = f"{WESHOP_BASE}/task/queryTask"
     payload = {"executionId": execution_id}
     r = requests.post(url, headers=WESHOP_HEADERS, json=payload, timeout=30)
@@ -149,7 +143,7 @@ def wait_for_result(execution_id, timeout=240):
     start = time.time()
 
     while True:
-        data = query_execution(execution_id)
+        data = query_task(execution_id)
         executions = data.get("executions", [])
 
         if executions:
@@ -171,9 +165,6 @@ def wait_for_result(execution_id, timeout=240):
 # TRY-ON BUTTON
 # ----------------------------------
 if st.button("✨ Try it on"):
-    if st.session_state.free_used:
-        st.warning("You've already used your free try-on.")
-        st.stop()
 
     if not user_image or (not cloth_url and not cloth_file):
         st.warning("Please upload your photo and provide an outfit.")
@@ -191,30 +182,22 @@ if st.button("✨ Try it on"):
             else:
                 cloth_path = save_temp_image(cloth_file)
 
-            # Upload to public CDN (required by WeShop)
+            # Upload to public CDN (required)
             person_url = fal_client.upload_file(person_path)
             outfit_url = fal_client.upload_file(cloth_path)
 
             # WeShop pipeline
-            task_id = create_virtual_tryon_task(person_url, outfit_url)
-            execution_id = execute_virtual_tryon(task_id)
+            task_id = create_virtualtryon_task(person_url, outfit_url)
+            execution_id = execute_virtualtryon(task_id)
             output_url = wait_for_result(execution_id)
 
             st.image(output_url, caption="Your virtual try-on", use_column_width=True)
             st.success("🎉 Your try-on is ready!")
-            st.session_state.free_used = True
 
         except Exception as e:
             st.error("🚨 Try-on failed.")
             st.write(str(e))
             st.text(traceback.format_exc())
-            st.info("""
-Best results:
-• Full-body standing photo  
-• Clear outfit image  
-• Plain background  
-• No group photos
-""")
 
         finally:
             try:
