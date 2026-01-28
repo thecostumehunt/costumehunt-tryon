@@ -1,40 +1,76 @@
 import streamlit as st
-import tempfile
 import requests
 import os
-from PIL import Image
-import fal_client
-import traceback
 
 # ----------------------------------
-# PAGE SETUP
+# CONFIG
 # ----------------------------------
 st.set_page_config(page_title="The Costume Hunt – Try On", layout="centered")
 
+BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
+
+# ----------------------------------
+# PAGE
+# ----------------------------------
 st.title("👗 Try This Outfit On Yourself")
 st.write("Upload your full-body photo and preview how a full outfit looks on you.")
 st.caption("Powered by TheCostumeHunt.com • Photos are processed temporarily and deleted.")
 
 # ----------------------------------
-# API KEY
+# DEVICE INIT
 # ----------------------------------
+if "device_token" not in st.session_state:
+    try:
+        r = requests.get(f"{BACKEND_URL}/device/init", timeout=10)
+        data = r.json()
+        if "device_token" in data:
+            st.session_state.device_token = data["device_token"]
+        st.session_state.device = data
+    except:
+        st.error("Backend not reachable.")
+        st.stop()
+
+def api_headers():
+    return {
+        "Authorization": f"Bearer {st.session_state.device_token}"
+    }
+
+# ----------------------------------
+# GET CREDITS
+# ----------------------------------
+credits_data = None
 try:
-    os.environ["FAL_KEY"] = st.secrets["FAL_KEY"]
+    r = requests.get(f"{BACKEND_URL}/credits", headers=api_headers(), timeout=10)
+    credits_data = r.json()
 except:
-    st.error("Please set FAL_KEY in Streamlit Secrets")
-    st.stop()
+    st.warning("Could not fetch credits.")
+
+if credits_data:
+    st.info(f"💳 Credits left: {credits_data['credits']}")
 
 # ----------------------------------
-# SESSION CONTROL
+# FREE UNLOCK UI
 # ----------------------------------
-if "free_used" not in st.session_state:
-    st.session_state.free_used = False
+if credits_data and credits_data["credits"] == 0 and not credits_data["free_used"]:
+    st.subheader("🎁 Get your free try")
+    email = st.text_input("Enter your email to unlock your free try")
 
-query_params = st.query_params
-cloth_url = query_params.get("cloth", None)
+    if st.button("Unlock free try"):
+        r = requests.post(
+            f"{BACKEND_URL}/free/unlock",
+            headers={**api_headers(), "Content-Type": "application/json"},
+            json={"email": email},
+            timeout=10
+        )
+
+        if r.status_code == 200:
+            st.success("Free try unlocked!")
+            st.rerun()
+        else:
+            st.error(r.json().get("detail", "Unlock failed"))
 
 # ----------------------------------
-# UI
+# UI INPUTS
 # ----------------------------------
 st.subheader("1. Upload your photo")
 user_image = st.file_uploader(
@@ -43,6 +79,9 @@ user_image = st.file_uploader(
 )
 
 st.subheader("2. Outfit image (full outfit or dress)")
+
+query_params = st.query_params
+cloth_url = query_params.get("cloth", None)
 
 if cloth_url:
     try:
@@ -56,92 +95,47 @@ else:
 st.subheader("3. Generate try-on")
 
 # ----------------------------------
-# HELPERS
-# ----------------------------------
-def save_temp_image(file):
-    img = Image.open(file).convert("RGB")
-    temp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    img.save(temp.name, format="PNG")
-    temp.close()
-    return temp.name
-
-def download_image(url):
-    r = requests.get(url, stream=True, timeout=30)
-    r.raise_for_status()
-    img = Image.open(r.raw).convert("RGB")
-    temp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    img.save(temp.name, format="PNG")
-    temp.close()
-    return temp.name
-
-# ----------------------------------
 # TRY-ON
 # ----------------------------------
 if st.button("✨ Try it on"):
-    if st.session_state.free_used:
-        st.warning("You've already used your free try-on.")
-        st.stop()
 
     if not user_image or not cloth_url:
         st.warning("Please upload your photo and provide an outfit image.")
         st.stop()
 
+    if not credits_data or credits_data["credits"] < 1:
+        st.warning("You don't have credits. Unlock free try or purchase credits.")
+        st.stop()
+
     with st.spinner("Creating your virtual try-on… please wait 30–60 seconds"):
-        person_path = None
-        cloth_path = None
-
         try:
-            # Save images
-            person_path = save_temp_image(user_image)
-            cloth_path = download_image(cloth_url)
+            files = {
+                "person_image": user_image.getvalue()
+            }
 
-            # Upload to FAL CDN
-            person_url = fal_client.upload_file(person_path)
-            garment_url = fal_client.upload_file(cloth_path)
+            params = {
+                "garment_url": cloth_url
+            }
 
-            # ✅ Official queue-based Kolors call (your version returns dict directly)
-            result = fal_client.subscribe(
-                "fal-ai/kling/v1-5/kolors-virtual-try-on",
-                arguments={
-                    "human_image_url": person_url,
-                    "garment_image_url": garment_url
-                },
-                with_logs=True
+            r = requests.post(
+                f"{BACKEND_URL}/tryon",
+                headers=api_headers(),
+                params=params,
+                files=files,
+                timeout=300
             )
 
-            # Extract output
-            if "image_url" in result:
-                output_url = result["image_url"]
-            elif "data" in result and "image_url" in result["data"]:
-                output_url = result["data"]["image_url"]
-            elif "image" in result and "url" in result["image"]:
-                output_url = result["image"]["url"]
+            if r.status_code == 200:
+                data = r.json()
+                st.image(data["image_url"], caption="Your real virtual try-on", use_column_width=True)
+                st.success("🎉 Your try-on is ready!")
+                st.rerun()
             else:
-                raise ValueError("No output image found in FAL response")
-
-            st.image(output_url, caption="Your real virtual try-on", use_column_width=True)
-            st.success("🎉 Your try-on is ready!")
-            st.session_state.free_used = True
+                st.error(r.json().get("detail", "Try-on failed"))
 
         except Exception as e:
             st.error("🚨 Try-on failed.")
             st.write(str(e))
-            st.text(traceback.format_exc())
-            st.info("""
-Best results:
-• Full-body standing photo  
-• Outfit image on plain background  
-• Avoid collages or screenshots
-""")
-
-        finally:
-            try:
-                if person_path and os.path.exists(person_path):
-                    os.remove(person_path)
-                if cloth_path and os.path.exists(cloth_path):
-                    os.remove(cloth_path)
-            except:
-                pass
 
 # ----------------------------------
 # FOOTER
@@ -149,3 +143,4 @@ Best results:
 st.markdown("---")
 st.write("🔒 Photos are automatically deleted after processing.")
 st.write("🩷 Daily-wear inspiration by TheCostumeHunt.com")
+
