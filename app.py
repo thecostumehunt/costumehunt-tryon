@@ -10,7 +10,7 @@ st.set_page_config(page_title="The Costume Hunt – Try On", layout="centered")
 BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
 
 # ----------------------------------
-# PAGE
+# PAGE HEADER
 # ----------------------------------
 st.title("👗 Try This Outfit On Yourself")
 st.write("Upload your full-body photo and preview how a full outfit looks on you.")
@@ -27,7 +27,7 @@ if "device_token" not in st.session_state:
             st.session_state.device_token = data["device_token"]
         st.session_state.device = data
     except:
-        st.error("Backend not reachable.")
+        st.error("❌ Backend not reachable. Please try again later.")
         st.stop()
 
 def api_headers():
@@ -36,17 +36,24 @@ def api_headers():
     }
 
 # ----------------------------------
-# GET CREDITS
+# FETCH CREDITS
 # ----------------------------------
 credits_data = None
 try:
     r = requests.get(f"{BACKEND_URL}/credits", headers=api_headers(), timeout=10)
     credits_data = r.json()
 except:
-    st.warning("Could not fetch credits.")
+    st.warning("⚠️ Could not fetch credits.")
 
 if credits_data:
     st.info(f"💳 Credits left: {credits_data['credits']}")
+
+# ----------------------------------
+# SHOW LAST RESULT
+# ----------------------------------
+if "last_image" in st.session_state:
+    st.subheader("🖼 Your last try-on result")
+    st.image(st.session_state.last_image, use_container_width=True)
 
 # ----------------------------------
 # FREE UNLOCK UI
@@ -64,13 +71,13 @@ if credits_data and credits_data["credits"] == 0 and not credits_data["free_used
         )
 
         if r.status_code == 200:
-            st.success("Free try unlocked!")
+            st.success("✅ Free try unlocked!")
             st.rerun()
         else:
             st.error(r.json().get("detail", "Unlock failed"))
 
 # ----------------------------------
-# UI INPUTS
+# USER INPUTS
 # ----------------------------------
 st.subheader("1. Upload your photo")
 user_image = st.file_uploader(
@@ -95,7 +102,7 @@ else:
 st.subheader("3. Generate try-on")
 
 # ----------------------------------
-# TRY-ON
+# TRY-ON BUTTON
 # ----------------------------------
 if st.button("✨ Try it on"):
 
@@ -127,7 +134,7 @@ if st.button("✨ Try it on"):
 
             if r.status_code == 200:
                 data = r.json()
-                st.image(data["image_url"], caption="Your real virtual try-on", use_column_width=True)
+                st.session_state.last_image = data["image_url"]
                 st.success("🎉 Your try-on is ready!")
                 st.rerun()
             else:
@@ -143,4 +150,3 @@ if st.button("✨ Try it on"):
 st.markdown("---")
 st.write("🔒 Photos are automatically deleted after processing.")
 st.write("🩷 Daily-wear inspiration by TheCostumeHunt.com")
-
