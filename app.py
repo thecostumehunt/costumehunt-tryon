@@ -1,6 +1,7 @@
 import streamlit as st
 import requests
 import os
+import time
 
 # ----------------------------------
 # CONFIG
@@ -36,13 +37,15 @@ def api_headers():
 # ----------------------------------
 # FETCH CREDITS
 # ----------------------------------
-credits_data = None
-try:
-    r = requests.get(f"{BACKEND_URL}/credits", headers=api_headers(), timeout=10)
-    credits_data = r.json()
-except:
-    st.warning("⚠️ Could not fetch credits.")
+@st.cache_data(ttl=30)
+def get_credits():
+    try:
+        r = requests.get(f"{BACKEND_URL}/credits", headers=api_headers(), timeout=10)
+        return r.json() if r.status_code == 200 else None
+    except:
+        return None
 
+credits_data = get_credits()
 if credits_data:
     st.info(f"💳 Credits left: {credits_data['credits']}")
 
@@ -67,147 +70,183 @@ if "last_image" in st.session_state:
 # ----------------------------------
 # FREE UNLOCK
 # ----------------------------------
-if credits_data and credits_data["credits"] == 0 and not credits_data["free_used"]:
+if credits_data and credits_data["credits"] == 0 and not credits_data.get("free_used", True):
     st.subheader("🎁 Get your free try")
     email = st.text_input("Enter your email to unlock your free try")
 
     if st.button("Unlock free try"):
-        r = requests.post(
-            f"{BACKEND_URL}/free/unlock",
-            headers={**api_headers(), "Content-Type": "application/json"},
-            json={"email": email},
-            timeout=10
-        )
-        if r.status_code == 200:
-            st.success("✅ Free try unlocked!")
-            st.rerun()
-        else:
-            st.error("Unlock failed")
+        try:
+            r = requests.post(
+                f"{BACKEND_URL}/free/unlock",
+                headers={**api_headers(), "Content-Type": "application/json"},
+                json={"email": email},
+                timeout=10
+            )
+            if r.status_code == 200:
+                st.success("✅ Free try unlocked!")
+                st.rerun()
+            else:
+                st.error(f"Unlock failed: {r.text[:100]}")
+        except Exception as e:
+            st.error(f"Error: {str(e)}")
 
 # ----------------------------------
-# PAYMENT HELPERS (FIXED)
+# PAYMENT SYSTEM (ORIGINAL + ROBUST)
 # ----------------------------------
 def create_checkout(pack):
+    """Create LemonSqueezy checkout link via backend"""
     try:
+        url = f"{BACKEND_URL}/lemon/create-link"
+        payload = {"pack": pack}
+        
         r = requests.post(
-            f"{BACKEND_URL}/lemon/create-link?pack={pack}",
-            headers=api_headers(),
+            url,
+            headers={**api_headers(), "Content-Type": "application/json"},
+            json=payload,
             timeout=15
         )
+        
         if r.status_code == 200:
             data = r.json()
             return data.get("checkout_url")
+        else:
+            st.error(f"Backend error {r.status_code}: {r.text[:150]}")
+            return None
+            
+    except requests.exceptions.Timeout:
+        st.error("Backend timeout - payment service slow")
         return None
     except Exception as e:
-        st.error(f"Payment link error: {str(e)[:100]}")
+        st.error(f"Payment error: {str(e)[:100]}")
         return None
 
+# Cache checkout links for 5 minutes
+@st.cache_data(ttl=300)
+def get_cached_checkout(pack):
+    return create_checkout(pack)
+
 # ----------------------------------
-# BUY CREDITS UI (ROBUST VERSION)
+# BUY CREDITS UI (ORIGINAL FLOW)
 # ----------------------------------
 if credits_data and credits_data["credits"] == 0:
 
     st.markdown("---")
-    st.subheader("✨ Continue trying outfits")
-    st.write("Buy credits to try more outfits on yourself.")
+    st.subheader("✨ Buy Credits")
+    st.write("Get instant credits via LemonSqueezy (webhooks auto-sync)")
 
-    c1, c2, c3 = st.columns(3)
+    # Payment packages
+    packages = [
+        {"name": "Starter", "credits": 5, "price": "$2", "key": "pkg5"},
+        {"name": "Popular", "credits": 15, "price": "$5", "key": "pkg15"},
+        {"name": "Pro", "credits": 100, "price": "$20", "key": "pkg100"}
+    ]
 
-    with c1:
-        st.markdown("**5 tries**")
-        st.markdown("$2")
-        if st.button("💳 Generate 5-credit link", key="gen5", use_container_width=True):
-            with st.spinner("Creating checkout..."):
-                link = create_checkout(5)
-                if link:
-                    st.success("✅ Link ready!")
-                    st.link_button("👉 Pay $2 for 5 credits", link, use_container_width=True, type="primary")
-                else:
-                    st.error("❌ Failed to create link. Check backend.")
+    cols = st.columns(3)
+    
+    for i, pkg in enumerate(packages):
+        with cols[i]:
+            st.markdown(f"**{pkg['credits']} tries**")
+            st.markdown(f"*{pkg['price']}*")
+            
+            # Generate link on button click
+            if st.button(f"💳 Buy {pkg['credits']} credits", 
+                        key=f"buy_{pkg['key']}", 
+                        use_container_width=True):
+                
+                with st.spinner(f"🔄 Creating {pkg['credits']}-credit checkout..."):
+                    link = get_cached_checkout(pkg['credits'])
+                    
+                    if link:
+                        st.success(f"✅ Checkout ready for {pkg['credits']} credits!")
+                        st.link_button(
+                            f"👉 Pay {pkg['price']} Now", 
+                            link, 
+                            use_container_width=True,
+                            type="primary",
+                            help="Opens LemonSqueezy checkout (new tab)"
+                        )
+                        
+                        # Show link info
+                        st.info(f"💡 After payment, **refresh this page** to see credits")
+                        
+                    else:
+                        st.error("❌ Backend payment service failed")
+                        st.info("👨‍💻 Contact support or try again in 1 minute")
 
-    with c2:
-        st.markdown("**15 tries**")
-        st.markdown("$5")
-        if st.button("💳 Generate 15-credit link", key="gen15", use_container_width=True):
-            with st.spinner("Creating checkout..."):
-                link = create_checkout(15)
-                if link:
-                    st.success("✅ Link ready!")
-                    st.link_button("👉 Pay $5 for 15 credits", link, use_container_width=True, type="primary")
-                else:
-                    st.error("❌ Failed to create link. Check backend.")
-
-    with c3:
-        st.markdown("**100 tries**")
-        st.markdown("$20")
-        if st.button("💳 Generate 100-credit link", key="gen100", use_container_width=True):
-            with st.spinner("Creating checkout..."):
-                link = create_checkout(100)
-                if link:
-                    st.success("✅ Link ready!")
-                    st.link_button("👉 Pay $20 for 100 credits", link, use_container_width=True, type="primary")
-                else:
-                    st.error("❌ Failed to create link. Check backend.")
-
-    st.caption("✓ After payment, return here and refresh (Ctrl+R) to see your credits.")
+    st.markdown("---")
 
 # ----------------------------------
 # USER INPUTS
 # ----------------------------------
 st.subheader("1. Upload your photo")
 user_image = st.file_uploader(
-    "Upload a clear, full-body photo",
-    type=["jpg", "jpeg", "png", "webp"]
+    "Upload a clear, full-body photo (standing, good lighting)",
+    type=["jpg", "jpeg", "png", "webp"],
+    help="Best results: full body, front-facing, plain background"
 )
 
 st.subheader("2. Outfit image")
-
 query_params = st.query_params
-cloth_url = query_params.get("cloth", None)
+cloth_url = query_params.get("cloth")
 
 if cloth_url:
-    st.image(cloth_url, caption="Selected outfit", width=260)
+    st.image(cloth_url, caption="Selected outfit from blog", width=260, use_column_width=True)
 else:
-    cloth_url = st.text_input("Paste outfit image URL")
+    cloth_url = st.text_input(
+        "Paste outfit image URL", 
+        placeholder="https://example.com/outfit.jpg",
+        help="Works with any clothing image URL"
+    )
 
 st.subheader("3. Generate try-on")
 
 # ----------------------------------
-# TRY-ON
+# TRY-ON BUTTON
 # ----------------------------------
-if st.button("✨ Try it on", use_container_width=True):
+if st.button("✨ Try it on me!", use_container_width=True, type="primary"):
 
-    if not user_image or not cloth_url:
-        st.warning("Please upload your photo and provide outfit image.")
+    # Validation
+    if not user_image:
+        st.warning("👆 Upload your photo first")
         st.stop()
-
+    
+    if not cloth_url:
+        st.warning("👆 Enter outfit image URL")
+        st.stop()
+    
     if not credits_data or credits_data["credits"] < 1:
-        st.warning("You don't have credits. Buy some above!")
+        st.warning("⛔ No credits! Buy credits above or unlock free try")
         st.stop()
 
-    with st.spinner("🎨 Creating your virtual try-on… This takes ~30 seconds"):
-        files = {"person_image": user_image.getvalue()}
-        params = {"garment_url": cloth_url}
+    # Process try-on
+    with st.spinner("🎨 Generating virtual try-on... (~30 seconds)"):
+        try:
+            files = {"person_image": user_image.getvalue()}
+            params = {"garment_url": cloth_url}
 
-        r = requests.post(
-            f"{BACKEND_URL}/tryon",
-            headers=api_headers(),
-            params=params,
-            files=files,
-            timeout=300
-        )
+            r = requests.post(
+                f"{BACKEND_URL}/tryon",
+                headers=api_headers(),
+                params=params,
+                files=files,
+                timeout=300
+            )
 
-        if r.status_code == 200:
-            data = r.json()
-            st.session_state.last_image = data["image_url"]
-            st.success("🎉 Your try-on is ready!")
-            st.rerun()
-        else:
-            st.error(f"Try-on failed: {r.status_code} - {r.text[:100]}")
+            if r.status_code == 200:
+                data = r.json()
+                st.session_state.last_image = data["image_url"]
+                st.success("🎉 Your virtual try-on is ready!")
+                st.rerun()
+            else:
+                st.error(f"Try-on failed: {r.status_code}")
+                st.info(f"Debug: {r.text[:200]}")
+                
+        except Exception as e:
+            st.error(f"Processing error: {str(e)}")
 
 # ----------------------------------
 # FOOTER
 # ----------------------------------
 st.markdown("---")
-st.markdown("*🔒 Photos are automatically deleted after processing.*")
-st.markdown("*🩷 TheCostumeHunt.com*")
+st.markdown("*🔒 Your photos are processed temporarily and **deleted immediately after***")
+st.markdown("*🩷 Powered by TheCostumeHunt.com*")
