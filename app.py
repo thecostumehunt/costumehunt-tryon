@@ -1,6 +1,7 @@
 import streamlit as st
 import requests
 import os
+from streamlit_cookies_manager import EncryptedCookieManager
 
 # ----------------------------------
 # CONFIG
@@ -10,6 +11,17 @@ st.set_page_config(page_title="The Costume Hunt – Try On", layout="centered")
 BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
 
 # ----------------------------------
+# COOKIE MANAGER (PERSIST DEVICE)
+# ----------------------------------
+cookies = EncryptedCookieManager(
+    prefix="tryon_",
+    password="CHANGE_THIS_TO_A_LONG_RANDOM_SECRET_123!@#"
+)
+
+if not cookies.ready():
+    st.stop()
+
+# ----------------------------------
 # PAGE HEADER
 # ----------------------------------
 st.title("👗 Try This Outfit On Yourself")
@@ -17,18 +29,29 @@ st.write("Upload your full-body photo and preview how a full outfit looks on you
 st.caption("Powered by TheCostumeHunt.com • Photos are processed temporarily and deleted.")
 
 # ----------------------------------
-# DEVICE INIT
+# DEVICE INIT (PERSISTENT)
 # ----------------------------------
 if "device_token" not in st.session_state:
-    try:
-        r = requests.get(f"{BACKEND_URL}/device/init", timeout=10)
-        data = r.json()
-        if "device_token" in data:
-            st.session_state.device_token = data["device_token"]
-        st.session_state.device = data
-    except:
-        st.error("❌ Backend not reachable. Please try again later.")
-        st.stop()
+    saved_token = cookies.get("device_token")
+
+    if saved_token:
+        st.session_state.device_token = saved_token
+    else:
+        try:
+            r = requests.get(f"{BACKEND_URL}/device/init", timeout=10)
+            data = r.json()
+
+            if "device_token" in data:
+                st.session_state.device_token = data["device_token"]
+                cookies["device_token"] = data["device_token"]
+                cookies.save()
+
+            st.session_state.device = data
+
+        except:
+            st.error("❌ Backend not reachable. Please try again later.")
+            st.stop()
+
 
 def api_headers():
     return {
@@ -148,5 +171,6 @@ if st.button("✨ Try it on"):
 # FOOTER
 # ----------------------------------
 st.markdown("---")
-st.write("🔒 Photos are automatically deleted after processing.")
-st.write("🩷 Daily-wear inspiration by TheCostumeHunt.com")
+st.caption("🔒 All images autodelete after use. Clearing cache data will remove access.")
+st.caption("🩷 Daily-wear inspiration by TheCostumeHunt.com")
+
