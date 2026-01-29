@@ -1,4 +1,3 @@
-
 import streamlit as st
 import requests
 import os
@@ -94,12 +93,13 @@ def create_checkout(pack):
             headers=api_headers(),
             timeout=10
         )
-        return r.json().get("checkout_url")
+        data = r.json()
+        return data.get("url") or data.get("checkout_url")
     except:
         return None
 
 # ----------------------------------
-# BUY CREDITS UI (SAFE MODE)
+# BUY CREDITS UI (AUTO REDIRECT MODE)
 # ----------------------------------
 if credits_data and credits_data["credits"] == 0:
 
@@ -124,22 +124,19 @@ if credits_data and credits_data["credits"] == 0:
         if st.button("💳 100 tries – $20"):
             st.session_state.checkout_url = create_checkout(100)
 
+    # AUTO REDIRECT
     if st.session_state.checkout_url:
-        st.success("Checkout ready 👇")
+        st.success("Redirecting to secure checkout…")
+
+        st.markdown(
+            f'<meta http-equiv="refresh" content="0; url={st.session_state.checkout_url}">',
+            unsafe_allow_html=True
+        )
 
         st.markdown(
             f"""
-            <a href="{st.session_state.checkout_url}" target="_blank"
-               style="
-               display:inline-block;
-               padding:14px 22px;
-               background:#ff4b4b;
-               color:white;
-               border-radius:10px;
-               text-decoration:none;
-               font-weight:600;
-               margin-top:8px;">
-               👉 Go to secure checkout
+            <a href="{st.session_state.checkout_url}" target="_blank">
+            👉 Click here if you are not redirected automatically
             </a>
             """,
             unsafe_allow_html=True
