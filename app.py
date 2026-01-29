@@ -1,3 +1,4 @@
+
 import streamlit as st
 import requests
 import os
@@ -98,7 +99,7 @@ def create_checkout(pack):
         return None
 
 # ----------------------------------
-# BUY CREDITS UI
+# BUY CREDITS UI (SAFE MODE)
 # ----------------------------------
 if credits_data and credits_data["credits"] == 0:
 
@@ -125,12 +126,26 @@ if credits_data and credits_data["credits"] == 0:
 
     if st.session_state.checkout_url:
         st.success("Checkout ready 👇")
-        st.link_button(
-            "➡️ Go to secure checkout",
-            st.session_state.checkout_url,
-            use_container_width=True
+
+        st.markdown(
+            f"""
+            <a href="{st.session_state.checkout_url}" target="_blank"
+               style="
+               display:inline-block;
+               padding:14px 22px;
+               background:#ff4b4b;
+               color:white;
+               border-radius:10px;
+               text-decoration:none;
+               font-weight:600;
+               margin-top:8px;">
+               👉 Go to secure checkout
+            </a>
+            """,
+            unsafe_allow_html=True
         )
-        st.caption("After payment, come back and refresh this page.")
+
+        st.caption("After payment, return here and refresh this page.")
 
 # ----------------------------------
 # USER INPUTS
