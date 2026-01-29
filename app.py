@@ -99,7 +99,7 @@ def create_checkout(pack):
         return None
 
 # ----------------------------------
-# BUY CREDITS UI (RELIABLE MODE)
+# BUY CREDITS UI (FIXED - RELIABLE)
 # ----------------------------------
 if credits_data and credits_data["credits"] == 0:
 
@@ -107,51 +107,36 @@ if credits_data and credits_data["credits"] == 0:
     st.subheader("✨ Continue trying outfits")
     st.write("Buy credits to try more outfits on yourself.")
 
-    if "checkout_links" not in st.session_state:
-        st.session_state.checkout_links = {}
-
-    def load_link(pack):
-        link = create_checkout(pack)
-        if link:
-            st.session_state.checkout_links[pack] = link
-
     c1, c2, c3 = st.columns(3)
 
     with c1:
-        if st.button("💳 5 tries – $2"):
-            load_link(5)
+        st.write("**5 tries**")
+        st.write("$2")
+        link_5 = create_checkout(5)
+        if link_5:
+            st.link_button("💳 Buy Now", link_5, use_container_width=True)
+        else:
+            st.error("Link error")
 
     with c2:
-        if st.button("💳 15 tries – $5"):
-            load_link(15)
+        st.write("**15 tries**")
+        st.write("$5")
+        link_15 = create_checkout(15)
+        if link_15:
+            st.link_button("💳 Buy Now", link_15, use_container_width=True)
+        else:
+            st.error("Link error")
 
     with c3:
-        if st.button("💳 100 tries – $20"):
-            load_link(100)
+        st.write("**100 tries**")
+        st.write("$20")
+        link_100 = create_checkout(100)
+        if link_100:
+            st.link_button("💳 Buy Now", link_100, use_container_width=True)
+        else:
+            st.error("Link error")
 
-    # SHOW REAL CHECKOUT LINKS
-    for pack, link in st.session_state.checkout_links.items():
-        st.markdown(
-            f"""
-            <div style="margin-top:12px">
-            <a href="{link}" target="_blank"
-               style="
-               display:inline-block;
-               padding:14px 22px;
-               background:#ff4b4b;
-               color:white;
-               border-radius:10px;
-               text-decoration:none;
-               font-weight:600;">
-               👉 Pay now for {pack} credits
-            </a>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-    if st.session_state.checkout_links:
-        st.caption("After payment, come back here and refresh this page.")
+    st.caption("✓ After payment, return here and refresh this page to see your credits.")
 
 # ----------------------------------
 # USER INPUTS
