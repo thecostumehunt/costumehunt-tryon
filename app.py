@@ -1,7 +1,6 @@
 import streamlit as st
 import requests
 import os
-import streamlit.components.v1 as components
 
 # ----------------------------------
 # CONFIG
@@ -52,12 +51,17 @@ if credits_data:
 if "last_image" in st.session_state:
     st.subheader("🖼 Your last try-on result")
     st.image(st.session_state.last_image, use_container_width=True)
-    st.download_button(
-        "⬇️ Download image",
-        data=requests.get(st.session_state.last_image).content,
-        file_name="tryon.png",
-        mime="image/png"
-    )
+
+    try:
+        img_bytes = requests.get(st.session_state.last_image).content
+        st.download_button(
+            "⬇️ Download image",
+            data=img_bytes,
+            file_name="tryon.png",
+            mime="image/png"
+        )
+    except:
+        pass
 
 # ----------------------------------
 # FREE UNLOCK
@@ -97,47 +101,36 @@ def create_checkout(pack):
 # BUY CREDITS UI
 # ----------------------------------
 if credits_data and credits_data["credits"] == 0:
+
     st.markdown("---")
     st.subheader("✨ Continue trying outfits")
     st.write("Buy credits to try more outfits on yourself.")
 
-    c1, c2, c3 = st.columns(3)
+    if "checkout_url" not in st.session_state:
+        st.session_state.checkout_url = None
 
-    def redirect(link):
-        components.html(
-            f"""
-            <html>
-            <head>
-            <script>
-                window.top.location.href = "{link}";
-            </script>
-            </head>
-            <body></body>
-            </html>
-            """,
-            height=0,
-        )
+    c1, c2, c3 = st.columns(3)
 
     with c1:
         if st.button("💳 5 tries – $2"):
-            link = create_checkout(5)
-            if link:
-                st.success("Redirecting to checkout...")
-                redirect(link)
+            st.session_state.checkout_url = create_checkout(5)
 
     with c2:
         if st.button("💳 15 tries – $5"):
-            link = create_checkout(15)
-            if link:
-                st.success("Redirecting to checkout...")
-                redirect(link)
+            st.session_state.checkout_url = create_checkout(15)
 
     with c3:
         if st.button("💳 100 tries – $20"):
-            link = create_checkout(100)
-            if link:
-                st.success("Redirecting to checkout...")
-                redirect(link)
+            st.session_state.checkout_url = create_checkout(100)
+
+    if st.session_state.checkout_url:
+        st.success("Checkout ready 👇")
+        st.link_button(
+            "➡️ Go to secure checkout",
+            st.session_state.checkout_url,
+            use_container_width=True
+        )
+        st.caption("After payment, come back and refresh this page.")
 
 # ----------------------------------
 # USER INPUTS
@@ -164,6 +157,7 @@ st.subheader("3. Generate try-on")
 # TRY-ON
 # ----------------------------------
 if st.button("✨ Try it on"):
+
     if not user_image or not cloth_url:
         st.warning("Please upload your photo and provide outfit image.")
         st.stop()
