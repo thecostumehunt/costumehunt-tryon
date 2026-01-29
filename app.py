@@ -85,21 +85,25 @@ if credits_data and credits_data["credits"] == 0 and not credits_data["free_used
             st.error("Unlock failed")
 
 # ----------------------------------
-# PAYMENT HELPERS
+# PAYMENT HELPERS (FIXED)
 # ----------------------------------
 def create_checkout(pack):
     try:
         r = requests.post(
             f"{BACKEND_URL}/lemon/create-link?pack={pack}",
             headers=api_headers(),
-            timeout=10
+            timeout=15
         )
-        return r.json().get("checkout_url")
-    except:
+        if r.status_code == 200:
+            data = r.json()
+            return data.get("checkout_url")
+        return None
+    except Exception as e:
+        st.error(f"Payment link error: {str(e)[:100]}")
         return None
 
 # ----------------------------------
-# BUY CREDITS UI (FIXED - RELIABLE)
+# BUY CREDITS UI (ROBUST VERSION)
 # ----------------------------------
 if credits_data and credits_data["credits"] == 0:
 
@@ -110,33 +114,42 @@ if credits_data and credits_data["credits"] == 0:
     c1, c2, c3 = st.columns(3)
 
     with c1:
-        st.write("**5 tries**")
-        st.write("$2")
-        link_5 = create_checkout(5)
-        if link_5:
-            st.link_button("💳 Buy Now", link_5, use_container_width=True)
-        else:
-            st.error("Link error")
+        st.markdown("**5 tries**")
+        st.markdown("$2")
+        if st.button("💳 Generate 5-credit link", key="gen5", use_container_width=True):
+            with st.spinner("Creating checkout..."):
+                link = create_checkout(5)
+                if link:
+                    st.success("✅ Link ready!")
+                    st.link_button("👉 Pay $2 for 5 credits", link, use_container_width=True, type="primary")
+                else:
+                    st.error("❌ Failed to create link. Check backend.")
 
     with c2:
-        st.write("**15 tries**")
-        st.write("$5")
-        link_15 = create_checkout(15)
-        if link_15:
-            st.link_button("💳 Buy Now", link_15, use_container_width=True)
-        else:
-            st.error("Link error")
+        st.markdown("**15 tries**")
+        st.markdown("$5")
+        if st.button("💳 Generate 15-credit link", key="gen15", use_container_width=True):
+            with st.spinner("Creating checkout..."):
+                link = create_checkout(15)
+                if link:
+                    st.success("✅ Link ready!")
+                    st.link_button("👉 Pay $5 for 15 credits", link, use_container_width=True, type="primary")
+                else:
+                    st.error("❌ Failed to create link. Check backend.")
 
     with c3:
-        st.write("**100 tries**")
-        st.write("$20")
-        link_100 = create_checkout(100)
-        if link_100:
-            st.link_button("💳 Buy Now", link_100, use_container_width=True)
-        else:
-            st.error("Link error")
+        st.markdown("**100 tries**")
+        st.markdown("$20")
+        if st.button("💳 Generate 100-credit link", key="gen100", use_container_width=True):
+            with st.spinner("Creating checkout..."):
+                link = create_checkout(100)
+                if link:
+                    st.success("✅ Link ready!")
+                    st.link_button("👉 Pay $20 for 100 credits", link, use_container_width=True, type="primary")
+                else:
+                    st.error("❌ Failed to create link. Check backend.")
 
-    st.caption("✓ After payment, return here and refresh this page to see your credits.")
+    st.caption("✓ After payment, return here and refresh (Ctrl+R) to see your credits.")
 
 # ----------------------------------
 # USER INPUTS
@@ -162,17 +175,17 @@ st.subheader("3. Generate try-on")
 # ----------------------------------
 # TRY-ON
 # ----------------------------------
-if st.button("✨ Try it on"):
+if st.button("✨ Try it on", use_container_width=True):
 
     if not user_image or not cloth_url:
         st.warning("Please upload your photo and provide outfit image.")
         st.stop()
 
     if not credits_data or credits_data["credits"] < 1:
-        st.warning("You don't have credits.")
+        st.warning("You don't have credits. Buy some above!")
         st.stop()
 
-    with st.spinner("Creating your virtual try-on…"):
+    with st.spinner("🎨 Creating your virtual try-on… This takes ~30 seconds"):
         files = {"person_image": user_image.getvalue()}
         params = {"garment_url": cloth_url}
 
@@ -190,11 +203,11 @@ if st.button("✨ Try it on"):
             st.success("🎉 Your try-on is ready!")
             st.rerun()
         else:
-            st.error("Try-on failed")
+            st.error(f"Try-on failed: {r.status_code} - {r.text[:100]}")
 
 # ----------------------------------
 # FOOTER
 # ----------------------------------
 st.markdown("---")
-st.write("🔒 Photos are automatically deleted after processing.")
-st.write("🩷 TheCostumeHunt.com")
+st.markdown("*🔒 Photos are automatically deleted after processing.*")
+st.markdown("*🩷 TheCostumeHunt.com*")
