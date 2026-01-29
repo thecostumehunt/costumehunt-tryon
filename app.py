@@ -59,6 +59,22 @@ def api_headers():
     }
 
 # ----------------------------------
+# HELPER — CREATE LEMON CHECKOUT
+# ----------------------------------
+def create_checkout(pack):
+    try:
+        r = requests.post(
+            f"{BACKEND_URL}/lemon/create-link?pack={pack}",
+            headers=api_headers(),
+            timeout=10
+        )
+        data = r.json()
+        return data.get("checkout_url")
+    except:
+        st.error("Payment service not reachable.")
+        return None
+
+# ----------------------------------
 # FETCH CREDITS
 # ----------------------------------
 credits_data = None
@@ -100,6 +116,37 @@ if credits_data and credits_data["credits"] == 0 and not credits_data["free_used
             st.error(r.json().get("detail", "Unlock failed"))
 
 # ----------------------------------
+# BUY CREDITS UI
+# ----------------------------------
+if credits_data and credits_data["credits"] == 0:
+
+    st.markdown("---")
+    st.subheader("✨ Continue trying outfits")
+    st.write("You’ve used your free try. Get more credits to try different outfits on yourself.")
+
+    c1, c2, c3 = st.columns(3)
+
+    with c1:
+        if st.button("💳 5 tries – $2"):
+            link = create_checkout(5)
+            if link:
+                st.markdown(f"<meta http-equiv='refresh' content='0;url={link}'>", unsafe_allow_html=True)
+
+    with c2:
+        if st.button("💳 15 tries – $5"):
+            link = create_checkout(15)
+            if link:
+                st.markdown(f"<meta http-equiv='refresh' content='0;url={link}'>", unsafe_allow_html=True)
+
+    with c3:
+        if st.button("💳 100 tries – $20"):
+            link = create_checkout(100)
+            if link:
+                st.markdown(f"<meta http-equiv='refresh' content='0;url={link}'>", unsafe_allow_html=True)
+
+    st.caption("🔒 Credits are added instantly after payment and saved on this device.")
+
+# ----------------------------------
 # USER INPUTS
 # ----------------------------------
 st.subheader("1. Upload your photo")
@@ -108,7 +155,7 @@ user_image = st.file_uploader(
     type=["jpg", "jpeg", "png", "webp"]
 )
 
-st.subheader("2. Outfit image (full outfit or dress)")
+st.subheader("2. Outfit image")
 
 query_params = st.query_params
 cloth_url = query_params.get("cloth", None)
@@ -171,6 +218,5 @@ if st.button("✨ Try it on"):
 # FOOTER
 # ----------------------------------
 st.markdown("---")
-st.caption("🔒 All images autodelete after use. Clearing cache data will remove access.")
+st.caption("🔒 Credits are saved on this device. Clearing site data will remove access.")
 st.caption("🩷 Daily-wear inspiration by TheCostumeHunt.com")
-
