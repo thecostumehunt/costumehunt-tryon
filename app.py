@@ -6,6 +6,7 @@ import os
 # CONFIG
 # ----------------------------------
 st.set_page_config(page_title="The Costume Hunt – Try On", layout="centered")
+
 BACKEND_URL = os.getenv("BACKEND_URL", "https://tryon-backend-5wf1.onrender.com")
 
 # ----------------------------------
@@ -93,13 +94,12 @@ def create_checkout(pack):
             headers=api_headers(),
             timeout=10
         )
-        data = r.json()
-        return data.get("url") or data.get("checkout_url")
+        return r.json().get("checkout_url")
     except:
         return None
 
 # ----------------------------------
-# BUY CREDITS UI (AUTO REDIRECT MODE)
+# BUY CREDITS UI (RELIABLE MODE)
 # ----------------------------------
 if credits_data and credits_data["credits"] == 0:
 
@@ -107,42 +107,51 @@ if credits_data and credits_data["credits"] == 0:
     st.subheader("✨ Continue trying outfits")
     st.write("Buy credits to try more outfits on yourself.")
 
-    if "checkout_url" not in st.session_state:
-        st.session_state.checkout_url = None
+    if "checkout_links" not in st.session_state:
+        st.session_state.checkout_links = {}
+
+    def load_link(pack):
+        link = create_checkout(pack)
+        if link:
+            st.session_state.checkout_links[pack] = link
 
     c1, c2, c3 = st.columns(3)
 
     with c1:
         if st.button("💳 5 tries – $2"):
-            st.session_state.checkout_url = create_checkout(5)
+            load_link(5)
 
     with c2:
         if st.button("💳 15 tries – $5"):
-            st.session_state.checkout_url = create_checkout(15)
+            load_link(15)
 
     with c3:
         if st.button("💳 100 tries – $20"):
-            st.session_state.checkout_url = create_checkout(100)
+            load_link(100)
 
-    # AUTO REDIRECT
-    if st.session_state.checkout_url:
-        st.success("Redirecting to secure checkout…")
-
-        st.markdown(
-            f'<meta http-equiv="refresh" content="0; url={st.session_state.checkout_url}">',
-            unsafe_allow_html=True
-        )
-
+    # SHOW REAL CHECKOUT LINKS
+    for pack, link in st.session_state.checkout_links.items():
         st.markdown(
             f"""
-            <a href="{st.session_state.checkout_url}" target="_blank">
-            👉 Click here if you are not redirected automatically
+            <div style="margin-top:12px">
+            <a href="{link}" target="_blank"
+               style="
+               display:inline-block;
+               padding:14px 22px;
+               background:#ff4b4b;
+               color:white;
+               border-radius:10px;
+               text-decoration:none;
+               font-weight:600;">
+               👉 Pay now for {pack} credits
             </a>
+            </div>
             """,
             unsafe_allow_html=True
         )
 
-        st.caption("After payment, return here and refresh this page.")
+    if st.session_state.checkout_links:
+        st.caption("After payment, come back here and refresh this page.")
 
 # ----------------------------------
 # USER INPUTS
