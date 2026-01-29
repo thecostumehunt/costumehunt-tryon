@@ -2,3 +2,4 @@ streamlit
 pillow
 requests
 fal-client
+streamlit-cookies-manager
