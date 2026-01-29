@@ -69,6 +69,7 @@ def create_checkout(pack):
             timeout=10
         )
         data = r.json()
+        st.write("Checkout response:", data)
         return data.get("checkout_url")
     except:
         st.error("Payment service not reachable.")
