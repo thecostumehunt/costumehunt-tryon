@@ -7,7 +7,7 @@ import os
 # CONFIG
 # ----------------------------------
 st.set_page_config(page_title="The Costume Hunt – Try On", layout="centered")
-BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
+BACKEND_URL = os.getenv("BACKEND_URL", "https://tryon-backend-5wf1.onrender.com")
 
 # ----------------------------------
 # PAGE HEADER
