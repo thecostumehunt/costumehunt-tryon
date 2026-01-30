@@ -238,56 +238,50 @@ else:
         help="Direct link to clothing image (full outfit preferred)"
     )
 
+
 def remove_background(image_bytes):
     """
-    Correct + supported FAL usage:
-    - image must be a public URL
+    Background removal using official FAL Python SDK.
+    This matches playground behavior 1:1.
     """
     if not FAL_KEY:
         st.error("❌ FAL_KEY not configured")
         return None
 
     try:
-        # 1️⃣ Upload image to YOUR backend (temporary storage)
-        upload = requests.post(
-            f"{BACKEND_URL}/upload/temp-image",
-            files={"file": ("person.png", image_bytes, "image/png")},
-            timeout=30
+        from io import BytesIO
+
+        def on_queue_update(update):
+            # Optional logs (same as playground)
+            if hasattr(update, "logs") and update.logs:
+                for log in update.logs:
+                    print(log.get("message", ""))
+
+        # Convert bytes → file-like object
+        image_file = BytesIO(image_bytes)
+        image_file.name = "person.png"  # IMPORTANT
+
+        result = fal_client.subscribe(
+            "fal-ai/imageutils/rembg",
+            arguments={
+                "image": image_file   # 👈 THIS is the key line
+            },
+            with_logs=True,
+            on_queue_update=on_queue_update,
         )
-        upload.raise_for_status()
-        image_url = upload.json()["url"]  # must be publicly accessible
 
-        # 2️⃣ Call FAL with image_url (THIS IS WHAT THEY SUPPORT)
-        headers = {
-            "Authorization": f"Key {FAL_KEY}",
-            "Content-Type": "application/json"
-        }
+        # Result contains direct output
+        output = result["image"]
 
-        payload = {
-            "input": {
-                "image_url": image_url
-            }
-        }
-
-        r = requests.post(
-            "https://fal.run/fal-ai/imageutils/rembg",
-            json=payload,
-            headers=headers,
-            timeout=60
-        )
-        r.raise_for_status()
-
-        # 3️⃣ Result is immediate for rembg
-        result = r.json()
-        output_url = result["image"]["url"]
-
-        # 4️⃣ Download final image
-        final = requests.get(output_url, timeout=30)
+        # Download the returned image
+        image_url = output["url"]
+        final = requests.get(image_url, timeout=30)
         final.raise_for_status()
+
         return final.content
 
     except Exception as e:
-        st.error(f"❌ Background removal failed: {str(e)}")
+        st.error(f"❌ Background removal failed: {e}")
         return None
 
 
