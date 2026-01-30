@@ -5,6 +5,7 @@ import time
 import hashlib
 import io
 from PIL import Image
+import base64
 
 # ----------------------------------
 # CONFIG
@@ -38,17 +39,14 @@ st.caption("Powered by TheCostumeHunt.com • Photos are processed temporarily a
 query_params = st.query_params
 
 def init_device_safely():
-    # 1️⃣ token already in URL (preserve old flow)
     if "device_token" in query_params:
         token = query_params["device_token"][0]
         st.session_state.device_token = token
         return token
 
-    # 2️⃣ token already in session
     if "device_token" in st.session_state:
         return st.session_state.device_token
 
-    # 3️⃣ try old simple flow first (backwards compatible)
     try:
         r = requests.get(f"{BACKEND_URL}/device/init", timeout=10)
         r.raise_for_status()
@@ -58,9 +56,8 @@ def init_device_safely():
             st.session_state.device_token = token
             return token
     except:
-        pass  # fall through to fingerprint flow
+        pass
 
-    # 4️⃣ new fingerprint flow
     try:
         r = requests.get(
             f"{BACKEND_URL}/device/init", 
@@ -79,7 +76,6 @@ def init_device_safely():
     except Exception as e:
         pass
 
-    # 5️⃣ graceful fallback - let backend handle recognition
     st.warning("🔄 Using anonymous mode - some features may be limited")
     return None
 
@@ -96,7 +92,7 @@ def api_headers(token=None):
     headers["X-Fingerprint"] = FINGERPRINT
     return headers
 
-# DEBUG INFO (remove after testing)
+# DEBUG INFO
 if st.sidebar.checkbox("🛠️ Debug Info"):
     st.sidebar.write(f"🔑 Device Token: {st.session_state.device_token[:10]}..." if st.session_state.device_token else "None")
     st.sidebar.write(f"🖐️ Fingerprint: {FINGERPRINT}")
@@ -109,7 +105,7 @@ if query_params.get("checkout") == "success":
     st.rerun()
 
 # ----------------------------------
-# FETCH CREDITS (SOURCE OF TRUTH)
+# FETCH CREDITS
 # ----------------------------------
 @st.cache_data(ttl=30)
 def get_credits():
@@ -147,7 +143,7 @@ if "last_image" in st.session_state:
         st.info("💾 Download unavailable")
 
 # ----------------------------------
-# FREE UNLOCK (BACKEND ENFORCED)
+# FREE UNLOCK
 # ----------------------------------
 if credits_data and credits_data["credits"] == 0 and not credits_data.get("free_used", True):
     st.subheader("🎁 Get your free try")
@@ -170,7 +166,7 @@ if credits_data and credits_data["credits"] == 0 and not credits_data.get("free_
             st.error(f"❌ Network error: {str(e)}")
 
 # ----------------------------------
-# BUY CREDITS UI (HYBRID APPROACH)
+# BUY CREDITS UI
 # ----------------------------------
 if credits_data and credits_data["credits"] == 0:
     st.markdown("---")
@@ -239,55 +235,54 @@ else:
     )
 
 # ----------------------------------
-# BACKGROUND REMOVAL FUNCTION (HTTP API)
+# BACKGROUND REMOVAL FUNCTION (FIXED)
 # ----------------------------------
 def remove_background(image_bytes):
-    """Remove background from image using FAL HTTP API"""
+    """Remove background from image using FAL direct HTTP API"""
     if not FAL_KEY:
-        st.error("❌ FAL_KEY not configured in secrets")
-        return None
+        st.warning("⚠️ FAL_KEY not configured - skipping background removal")
+        return image_bytes  # Return original image
     
     try:
-        # First upload image to get URL
-        upload_files = {'image': ('image.png', image_bytes, 'image/png')}
-        upload_headers = {'Authorization': f'Key {FAL_KEY}'}
+        # Convert to base64 data URI (FAL accepts this directly)
+        image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+        data_uri = f"data:image/png;base64,{image_base64}"
         
-        upload_response = requests.post(
-            'https://fal.run/fal-ai/imageutils/rembg/upload',
-            files=upload_files,
-            headers=upload_headers,
-            timeout=30
-        )
-        upload_response.raise_for_status()
-        image_url = upload_response.json()['url']
-        
-        # Remove background
-        rembg_payload = {
-            'input': {'image_url': image_url}
+        # Direct FAL rembg endpoint
+        payload = {
+            "input": {
+                "image_url": data_uri
+            }
         }
-        rembg_headers = {
+        
+        headers = {
             'Authorization': f'Key {FAL_KEY}',
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'X-Fal-Client': 'streamlit'
         }
         
-        result = requests.post(
-            'https://fal.run/fal-ai/imageutils/rembg',
-            json=rembg_payload,
-            headers=rembg_headers,
-            timeout=60
-        ).json()
+        st.info("🧹 Calling FAL background removal...")
+        response = requests.post(
+            "https://fal.run/fal-ai/imageutils/rembg",
+            json=payload,
+            headers=headers,
+            timeout=90
+        )
+        response.raise_for_status()
         
-        # Download result
+        result = response.json()
         result_url = result['data']['image']['url']
+        
+        # Download processed image
         final_response = requests.get(result_url, timeout=30)
         final_response.raise_for_status()
         
-        st.success("✅ Background removed!")
+        st.success("✅ Background removed successfully!")
         return final_response.content
         
     except Exception as e:
-        st.error(f"❌ Background removal failed: {str(e)[:100]}")
-        return None
+        st.warning(f"⚠️ Background removal failed ({str(e)[:50]}), using original image")
+        return image_bytes  # Fallback to original image
 
 # ----------------------------------
 # CLIENT-SIDE COOLDOWN & TRY-ON
@@ -325,18 +320,14 @@ if generate_btn:
 
     with st.spinner("🎨 Creating virtual try-on (~30-60s)..."):
         try:
-            # STEP 1: Remove background
-            st.info("🧹 Step 1/2: Removing background...")
+            # STEP 1: Remove background (with fallback)
+            st.info("🧹 Step 1/2: Processing image...")
             original_image_bytes = user_image.getvalue()
             clean_image_bytes = remove_background(original_image_bytes)
-            
-            if not clean_image_bytes:
-                st.error("❌ Background removal failed. Cannot proceed.")
-                st.stop()
 
-            # STEP 2: Send cleaned image to backend
+            # STEP 2: Send to backend
             st.info("👗 Step 2/2: Generating try-on...")
-            files = {"person_image": ("clean_image.png", clean_image_bytes, "image/png")}
+            files = {"person_image": ("person_image.png", clean_image_bytes, "image/png")}
             params = {"garment_url": cloth_url.strip()}
 
             r = requests.post(
