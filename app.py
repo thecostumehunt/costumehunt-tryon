@@ -3,6 +3,9 @@ import requests
 import os
 import time
 import hashlib
+import io
+from PIL import Image
+import fal_client
 
 # ----------------------------------
 # CONFIG
@@ -16,6 +19,10 @@ BACKEND_URL = st.secrets.get(
     "BACKEND_URL",
     os.getenv("BACKEND_URL", "https://tryon-backend-5wf1.onrender.com")
 )
+
+# FAL Key (add to Streamlit secrets as FAL_KEY)
+FAL_KEY = st.secrets.get("FAL_KEY", os.getenv("FAL_KEY"))
+FAL_CLIENT = fal_client.FalClient(key=FAL_KEY) if FAL_KEY else None
 
 # Generate stable browser fingerprint
 FINGERPRINT = hashlib.sha256(f"{BACKEND_URL}".encode()).hexdigest()
@@ -234,6 +241,39 @@ else:
     )
 
 # ----------------------------------
+# BACKGROUND REMOVAL FUNCTION
+# ----------------------------------
+def remove_background(image_bytes):
+    """Remove background from image using FAL rembg API"""
+    if not FAL_CLIENT:
+        st.error("❌ FAL_KEY not configured in secrets")
+        return None
+    
+    try:
+        # Upload image to FAL storage first (needed for API)
+        image_file = io.BytesIO(image_bytes)
+        uploaded_url = FAL_CLIENT.storage.upload(image_file)
+        
+        # Remove background using fal-ai/imageutils/rembg
+        result = FAL_CLIENT.subscribe("fal-ai/imageutils/rembg", {
+            "input": {
+                "image_url": uploaded_url
+            }
+        })
+        
+        # Download the processed image
+        bg_removed_url = result['data']['image']['url']
+        response = requests.get(bg_removed_url)
+        response.raise_for_status()
+        
+        st.success("✅ Background removed successfully!")
+        return response.content
+        
+    except Exception as e:
+        st.error(f"❌ Background removal failed: {str(e)[:100]}")
+        return None
+
+# ----------------------------------
 # CLIENT-SIDE COOLDOWN & TRY-ON
 # ----------------------------------
 if "last_try_time" not in st.session_state:
@@ -272,7 +312,18 @@ if generate_btn:
 
     with st.spinner("🎨 Creating virtual try-on (~30-60s)..."):
         try:
-            files = {"person_image": user_image.getvalue()}
+            # STEP 1: Remove background from user image FIRST
+            st.info("🧹 Step 1/2: Removing background...")
+            original_image_bytes = user_image.getvalue()
+            clean_image_bytes = remove_background(original_image_bytes)
+            
+            if not clean_image_bytes:
+                st.error("❌ Background removal failed. Cannot proceed.")
+                st.stop()
+
+            # STEP 2: Send cleaned image to backend
+            st.info("👗 Step 2/2: Generating try-on...")
+            files = {"person_image": ("clean_image.png", clean_image_bytes, "image/png")}
             params = {"garment_url": cloth_url.strip()}
 
             r = requests.post(
@@ -310,4 +361,3 @@ if generate_btn:
 # ----------------------------------
 st.markdown("---")
 st.markdown("🔒 Photos deleted after processing • 🩷 [TheCostumeHunt.com](https://thecostumehunt.com)")
-
