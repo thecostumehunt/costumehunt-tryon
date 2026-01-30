@@ -20,10 +20,7 @@ BACKEND_URL = st.secrets.get(
     os.getenv("BACKEND_URL", "https://tryon-backend-5wf1.onrender.com")
 )
 
-# FAL Key (add to Streamlit secrets or environment)
 FAL_KEY = st.secrets.get("FAL_KEY", os.getenv("FAL_KEY"))
-
-# Generate stable browser fingerprint
 FINGERPRINT = hashlib.sha256(f"{BACKEND_URL}".encode()).hexdigest()
 
 # ----------------------------------
@@ -43,10 +40,8 @@ def init_device_safely():
         token = query_params["device_token"][0]
         st.session_state.device_token = token
         return token
-
     if "device_token" in st.session_state:
         return st.session_state.device_token
-
     try:
         r = requests.get(f"{BACKEND_URL}/device/init", timeout=10)
         r.raise_for_status()
@@ -57,7 +52,6 @@ def init_device_safely():
             return token
     except:
         pass
-
     try:
         r = requests.get(
             f"{BACKEND_URL}/device/init", 
@@ -67,15 +61,13 @@ def init_device_safely():
         r.raise_for_status()
         data = r.json()
         token = data.get("device_token")
-        
         if token:
             st.query_params.clear()
             st.query_params["device_token"] = token
             st.session_state.device_token = token
             return token
-    except Exception as e:
+    except:
         pass
-
     st.warning("🔄 Using anonymous mode - some features may be limited")
     return None
 
@@ -130,7 +122,6 @@ if credits_data:
 if "last_image" in st.session_state:
     st.subheader("🖼 Your last try-on result")
     st.image(st.session_state.last_image, use_container_width=True)
-
     try:
         img_bytes = requests.get(st.session_state.last_image, timeout=10).content
         st.download_button(
@@ -148,7 +139,6 @@ if "last_image" in st.session_state:
 if credits_data and credits_data["credits"] == 0 and not credits_data.get("free_used", True):
     st.subheader("🎁 Get your free try")
     email = st.text_input("Enter your email to unlock your free try")
-
     if st.button("Unlock free try", use_container_width=True):
         try:
             r = requests.post(
@@ -172,9 +162,7 @@ if credits_data and credits_data["credits"] == 0:
     st.markdown("---")
     st.subheader("✨ Buy Credits")
     st.write("Secure checkout via LemonSqueezy")
-
     c1, c2, c3 = st.columns(3)
-
     @st.cache_data(ttl=60)
     def create_checkout(pack: int):
         try:
@@ -188,19 +176,16 @@ if credits_data and credits_data["credits"] == 0:
             return None
         except:
             return None
-
     with c1:
         if st.button("💳 5 credits ($2)", use_container_width=True):
             link = create_checkout(5)
             if link:
                 st.link_button("👉 Checkout →", link, type="primary", use_container_width=True)
-
     with c2:
         if st.button("💳 15 credits ($5)", use_container_width=True):
             link = create_checkout(15)
             if link:
                 st.link_button("👉 Checkout →", link, type="primary", use_container_width=True)
-
     with c3:
         if st.button("💳 100 credits ($20)", use_container_width=True):
             link = create_checkout(100)
@@ -220,7 +205,6 @@ user_image = st.file_uploader(
 
 st.subheader("2. Outfit image")
 cloth_url = st.query_params.get("cloth", "")
-
 if cloth_url:
     try:
         st.image(cloth_url, caption="Selected outfit", width=260)
@@ -235,54 +219,59 @@ else:
     )
 
 # ----------------------------------
-# BACKGROUND REMOVAL FUNCTION (FIXED)
+# SIMPLIFIED BACKGROUND REMOVAL (WORKING VERSION)
 # ----------------------------------
 def remove_background(image_bytes):
-    """Remove background from image using FAL direct HTTP API"""
+    """Remove background using direct FAL API call - simplified and robust"""
     if not FAL_KEY:
-        st.warning("⚠️ FAL_KEY not configured - skipping background removal")
-        return image_bytes  # Return original image
+        st.info("⚠️ No FAL_KEY - skipping background removal (using original image)")
+        return image_bytes
     
     try:
-        # Convert to base64 data URI (FAL accepts this directly)
-        image_base64 = base64.b64encode(image_bytes).decode('utf-8')
-        data_uri = f"data:image/png;base64,{image_base64}"
+        # Create PIL image and save as PNG bytes (FAL prefers PNG)
+        pil_image = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
+        img_buffer = io.BytesIO()
+        pil_image.save(img_buffer, format="PNG")
+        img_buffer.seek(0)
+        png_bytes = img_buffer.read()
         
-        # Direct FAL rembg endpoint
+        # Convert to base64
+        image_b64 = base64.b64encode(png_bytes).decode('utf-8')
+        
+        # FAL expects simple input format for rembg
         payload = {
-            "input": {
-                "image_url": data_uri
-            }
+            "image_url": f"data:image/png;base64,{image_b64}",
+            "model": "u2net"
         }
         
         headers = {
             'Authorization': f'Key {FAL_KEY}',
-            'Content-Type': 'application/json',
-            'X-Fal-Client': 'streamlit'
+            'Content-Type': 'application/json'
         }
         
-        st.info("🧹 Calling FAL background removal...")
+        st.info("🧹 Removing background...")
+        
         response = requests.post(
-            "https://fal.run/fal-ai/imageutils/rembg",
+            "https://fal.run/fal-ai/rembg/enhance",
             json=payload,
             headers=headers,
-            timeout=90
+            timeout=120
         )
-        response.raise_for_status()
         
-        result = response.json()
-        result_url = result['data']['image']['url']
-        
-        # Download processed image
-        final_response = requests.get(result_url, timeout=30)
-        final_response.raise_for_status()
-        
-        st.success("✅ Background removed successfully!")
-        return final_response.content
-        
+        if response.status_code == 200:
+            result = response.json()
+            result_url = result['images'][0]
+            final_img = requests.get(result_url, timeout=30)
+            final_img.raise_for_status()
+            st.success("✅ Background removed!")
+            return final_img.content
+        else:
+            st.warning(f"⚠️ FAL API error {response.status_code}, using original")
+            return image_bytes
+            
     except Exception as e:
-        st.warning(f"⚠️ Background removal failed ({str(e)[:50]}), using original image")
-        return image_bytes  # Fallback to original image
+        st.warning(f"⚠️ Background removal failed: {str(e)[:50]}, using original")
+        return image_bytes
 
 # ----------------------------------
 # CLIENT-SIDE COOLDOWN & TRY-ON
@@ -302,32 +291,28 @@ with col2:
 st.subheader("3. Processing...")
 
 if generate_btn:
-    # VALIDATION
     if not user_image:
         st.error("👆 Please upload your photo first")
         st.stop()
-    
     if not cloth_url or cloth_url.strip() == "":
         st.error("👆 Please provide outfit image URL")
         st.stop()
-    
     if credits_data and credits_data["credits"] < 1:
         st.error("💳 No credits remaining. Buy credits above!")
         st.stop()
 
-    # UPDATE COOLDOWN
     st.session_state.last_try_time = now
 
     with st.spinner("🎨 Creating virtual try-on (~30-60s)..."):
         try:
-            # STEP 1: Remove background (with fallback)
-            st.info("🧹 Step 1/2: Processing image...")
-            original_image_bytes = user_image.getvalue()
-            clean_image_bytes = remove_background(original_image_bytes)
+            # STEP 1: Process image (background removal + fallback)
+            st.info("🧹 Step 1/2: Processing your photo...")
+            original_bytes = user_image.getvalue()
+            processed_bytes = remove_background(original_bytes)
 
-            # STEP 2: Send to backend
+            # STEP 2: Try-on generation
             st.info("👗 Step 2/2: Generating try-on...")
-            files = {"person_image": ("person_image.png", clean_image_bytes, "image/png")}
+            files = {"person_image": ("person_image.png", processed_bytes, "image/png")}
             params = {"garment_url": cloth_url.strip()}
 
             r = requests.post(
@@ -341,7 +326,6 @@ if generate_btn:
             if r.status_code == 200:
                 data = r.json()
                 image_url = data.get("image_url")
-                
                 if image_url:
                     st.session_state.last_image = image_url
                     st.success("🎉 Try-on generated successfully!")
