@@ -242,8 +242,8 @@ else:
 
 def remove_background(image_bytes):
     """
-    Correct FAL Python SDK usage.
-    Wraps image bytes using fal_client.File (required).
+    FAL Python SDK – version-safe implementation.
+    Uses a temporary file on disk (works in all versions).
     """
     if not FAL_KEY:
         st.error("❌ FAL_KEY not configured")
@@ -251,33 +251,33 @@ def remove_background(image_bytes):
 
     try:
         import fal_client
-        from io import BytesIO
+        import tempfile
 
         def on_queue_update(update):
             if hasattr(update, "logs") and update.logs:
                 for log in update.logs:
                     print(log.get("message", ""))
 
-        # Convert bytes → fal_client.File
-        image_file = fal_client.File(
-            file=BytesIO(image_bytes),
-            filename="person.png",
-            content_type="image/png"
-        )
+        # 1️⃣ Write image to temp file
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            tmp.write(image_bytes)
+            tmp_path = tmp.name
 
-        result = fal_client.subscribe(
-            "fal-ai/imageutils/rembg",
-            arguments={
-                "image": image_file   # ✅ THIS is the key fix
-            },
-            with_logs=True,
-            on_queue_update=on_queue_update,
-        )
+        # 2️⃣ Pass REAL file handle to FAL
+        with open(tmp_path, "rb") as f:
+            result = fal_client.subscribe(
+                "fal-ai/imageutils/rembg",
+                arguments={
+                    "image": f   # ✅ THIS WORKS
+                },
+                with_logs=True,
+                on_queue_update=on_queue_update,
+            )
 
-        # Extract output
+        # 3️⃣ Extract result
         output_url = result["image"]["url"]
 
-        # Download final image
+        # 4️⃣ Download processed image
         final = requests.get(output_url, timeout=30)
         final.raise_for_status()
         return final.content
