@@ -238,18 +238,26 @@ else:
         help="Direct link to clothing image (full outfit preferred)"
     )
 
-import base64
-
 def remove_background(image_bytes):
+    """
+    Correct + supported FAL usage:
+    - image must be a public URL
+    """
     if not FAL_KEY:
         st.error("❌ FAL_KEY not configured")
         return None
 
     try:
-        # Convert to DATA URL (this is the key fix)
-        image_b64 = base64.b64encode(image_bytes).decode("utf-8")
-        data_url = f"data:image/png;base64,{image_b64}"
+        # 1️⃣ Upload image to YOUR backend (temporary storage)
+        upload = requests.post(
+            f"{BACKEND_URL}/upload/temp-image",
+            files={"file": ("person.png", image_bytes, "image/png")},
+            timeout=30
+        )
+        upload.raise_for_status()
+        image_url = upload.json()["url"]  # must be publicly accessible
 
+        # 2️⃣ Call FAL with image_url (THIS IS WHAT THEY SUPPORT)
         headers = {
             "Authorization": f"Key {FAL_KEY}",
             "Content-Type": "application/json"
@@ -257,38 +265,26 @@ def remove_background(image_bytes):
 
         payload = {
             "input": {
-                "image_url": data_url
+                "image_url": image_url
             }
         }
 
-        # Start job
-        start = requests.post(
+        r = requests.post(
             "https://fal.run/fal-ai/imageutils/rembg",
             json=payload,
             headers=headers,
-            timeout=30
+            timeout=60
         )
-        start.raise_for_status()
+        r.raise_for_status()
 
-        request_id = start.json()["request_id"]
+        # 3️⃣ Result is immediate for rembg
+        result = r.json()
+        output_url = result["image"]["url"]
 
-        # Poll result
-        status_url = f"https://fal.run/fal-ai/imageutils/rembg/{request_id}"
-
-        for _ in range(60):
-            time.sleep(2)
-            poll = requests.get(status_url, headers=headers, timeout=15)
-            poll.raise_for_status()
-            result = poll.json()
-
-            if result["status"] == "COMPLETED":
-                output_b64 = result["response"]["image"]["base64"]
-                return base64.b64decode(output_b64)
-
-            if result["status"] == "FAILED":
-                raise RuntimeError("FAL background removal failed")
-
-        raise TimeoutError("Background removal timed out")
+        # 4️⃣ Download final image
+        final = requests.get(output_url, timeout=30)
+        final.raise_for_status()
+        return final.content
 
     except Exception as e:
         st.error(f"❌ Background removal failed: {str(e)}")
