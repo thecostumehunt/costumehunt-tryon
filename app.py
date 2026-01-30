@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import requests
 import os
 
@@ -58,7 +59,7 @@ if credits_data:
     st.info(f"💳 Credits left: {credits_data['credits']}")
 
 # ----------------------------------
-# PAYMENT HELPER (AUTO REDIRECT)
+# PAYMENT HELPER (STREAMLIT-SAFE REDIRECT)
 # ----------------------------------
 def redirect_to_checkout(pack: int):
     try:
@@ -72,11 +73,14 @@ def redirect_to_checkout(pack: int):
             checkout_url = r.json()["checkout_url"]
 
             st.success("🔁 Redirecting to secure checkout...")
-            st.markdown(
+
+            components.html(
                 f"""
-                <meta http-equiv="refresh" content="0;url={checkout_url}">
+                <script>
+                    window.location.href = "{checkout_url}";
+                </script>
                 """,
-                unsafe_allow_html=True
+                height=0,
             )
             st.stop()
 
