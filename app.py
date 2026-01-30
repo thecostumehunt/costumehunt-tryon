@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import os
 import time
+import hashlib
 
 # ----------------------------------
 # CONFIG
@@ -16,6 +17,9 @@ BACKEND_URL = st.secrets.get(
     os.getenv("BACKEND_URL", "https://tryon-backend-5wf1.onrender.com")
 )
 
+# Generate stable browser fingerprint
+FINGERPRINT = hashlib.sha256(f"{BACKEND_URL}".encode()).hexdigest()
+
 # ----------------------------------
 # PAGE HEADER
 # ----------------------------------
@@ -28,7 +32,6 @@ st.caption("Powered by TheCostumeHunt.com • Photos are processed temporarily a
 # ----------------------------------
 query_params = st.query_params
 
-
 def init_device_safely():
     # 1️⃣ token already in URL
     if "device_token" in query_params:
@@ -38,8 +41,12 @@ def init_device_safely():
     if "device_token" in st.session_state:
         return st.session_state.device_token
 
-    # 3️⃣ ask backend (NO assumptions)
-    r = requests.get(f"{BACKEND_URL}/device/init", timeout=10)
+    # 3️⃣ ask backend (with fingerprint)
+    r = requests.get(
+        f"{BACKEND_URL}/device/init", 
+        headers={"X-Fingerprint": FINGERPRINT},
+        timeout=10
+    )
     r.raise_for_status()
     data = r.json()
 
@@ -59,7 +66,6 @@ def init_device_safely():
         "Please refresh once."
     )
 
-
 try:
     st.session_state.device_token = init_device_safely()
 except Exception as e:
@@ -67,11 +73,11 @@ except Exception as e:
     st.code(str(e))
     st.stop()
 
-
 def api_headers():
     return {
         "Authorization": f"Bearer {st.session_state.device_token}",
         "Content-Type": "application/json",
+        "X-Fingerprint": FINGERPRINT  # Always include fingerprint
     }
 
 # ----------------------------------
@@ -79,7 +85,7 @@ def api_headers():
 # ----------------------------------
 if query_params.get("checkout") == "success":
     st.success("🎉 Payment successful! Credits have been added.")
-    st.rerun()
+    st.rerun()  # Auto-refresh credits display
 
 # ----------------------------------
 # FETCH CREDITS (SOURCE OF TRUTH)
@@ -232,7 +238,7 @@ if st.button("✨ Try it on", use_container_width=True):
 
         r = requests.post(
             f"{BACKEND_URL}/tryon",
-            headers={"Authorization": api_headers()["Authorization"]},
+            headers=api_headers(),
             params=params,
             files=files,
             timeout=300
