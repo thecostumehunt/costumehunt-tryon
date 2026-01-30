@@ -239,46 +239,20 @@ else:
     )
 
 
+import base64
 
-def upload_to_fal(image_bytes):
-    """Upload image bytes to FAL storage and return public URL"""
-    if not FAL_KEY:
-        raise RuntimeError("FAL_KEY missing")
-
-    files = {
-        "file": ("image.png", image_bytes, "image/png")
-    }
-
-    headers = {
-        "Authorization": f"Key {FAL_KEY}"
-    }
-
-    r = requests.post(
-        "https://fal.run/storage/upload",
-        files=files,
-        headers=headers,
-        timeout=30
-    )
-    r.raise_for_status()
-    return r.json()["url"]
-
-# ----------------------------------
-# BACKGROUND REMOVAL FUNCTION (HTTP API)
-# ----------------------------------
 def remove_background(image_bytes):
     """
-    Uses official FAL async subscribe flow for rembg.
-    Guaranteed compatible with fal-ai/imageutils/rembg
+    Correct FAL rembg implementation (no upload endpoint).
+    Uses base64 input + async polling.
     """
     if not FAL_KEY:
         st.error("❌ FAL_KEY not configured")
         return None
 
     try:
-        # STEP 1: Upload image to FAL
-        image_url = upload_to_fal(image_bytes)
+        image_base64 = base64.b64encode(image_bytes).decode("utf-8")
 
-        # STEP 2: Start rembg job
         headers = {
             "Authorization": f"Key {FAL_KEY}",
             "Content-Type": "application/json"
@@ -286,10 +260,11 @@ def remove_background(image_bytes):
 
         payload = {
             "input": {
-                "image_url": image_url
+                "image_base64": image_base64
             }
         }
 
+        # Start async job
         start = requests.post(
             "https://fal.run/fal-ai/imageutils/rembg/subscribe",
             json=payload,
@@ -297,28 +272,20 @@ def remove_background(image_bytes):
             timeout=30
         )
         start.raise_for_status()
-        data = start.json()
 
-        request_id = data["request_id"]
-
-        # STEP 3: Poll until completed
+        request_id = start.json()["request_id"]
         status_url = f"https://fal.run/fal-ai/imageutils/rembg/requests/{request_id}"
 
-        for _ in range(60):  # ~60s max
+        # Poll for result
+        for _ in range(60):  # ~2 minutes max
             time.sleep(2)
-
             poll = requests.get(status_url, headers=headers, timeout=15)
             poll.raise_for_status()
             result = poll.json()
 
             if result["status"] == "COMPLETED":
-                output_url = result["response"]["image"]["url"]
-
-                final_img = requests.get(output_url, timeout=30)
-                final_img.raise_for_status()
-
-                st.success("✅ Background removed successfully")
-                return final_img.content
+                output_b64 = result["response"]["image"]["base64"]
+                return base64.b64decode(output_b64)
 
             if result["status"] == "FAILED":
                 raise RuntimeError("FAL background removal failed")
@@ -328,6 +295,7 @@ def remove_background(image_bytes):
     except Exception as e:
         st.error(f"❌ Background removal failed: {str(e)}")
         return None
+
 
 # ----------------------------------
 # CLIENT-SIDE COOLDOWN & TRY-ON
