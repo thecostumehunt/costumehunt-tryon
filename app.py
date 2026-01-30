@@ -11,9 +11,9 @@ st.set_page_config(
     layout="centered"
 )
 
-BACKEND_URL = os.getenv(
+BACKEND_URL = st.secrets.get(
     "BACKEND_URL",
-    "https://tryon-backend-5wf1.onrender.com"
+    os.getenv("BACKEND_URL", "https://tryon-backend-5wf1.onrender.com")
 )
 
 # ----------------------------------
