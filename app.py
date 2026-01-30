@@ -242,48 +242,50 @@ else:
 
 def remove_background(image_bytes):
     """
-    Background removal using official FAL Python SDK.
-    This matches playground behavior 1:1.
+    Correct FAL Python SDK usage.
+    Wraps image bytes using fal_client.File (required).
     """
     if not FAL_KEY:
         st.error("❌ FAL_KEY not configured")
         return None
 
     try:
+        import fal_client
         from io import BytesIO
 
         def on_queue_update(update):
-            # Optional logs (same as playground)
             if hasattr(update, "logs") and update.logs:
                 for log in update.logs:
                     print(log.get("message", ""))
 
-        # Convert bytes → file-like object
-        image_file = BytesIO(image_bytes)
-        image_file.name = "person.png"  # IMPORTANT
+        # Convert bytes → fal_client.File
+        image_file = fal_client.File(
+            file=BytesIO(image_bytes),
+            filename="person.png",
+            content_type="image/png"
+        )
 
         result = fal_client.subscribe(
             "fal-ai/imageutils/rembg",
             arguments={
-                "image": image_file   # 👈 THIS is the key line
+                "image": image_file   # ✅ THIS is the key fix
             },
             with_logs=True,
             on_queue_update=on_queue_update,
         )
 
-        # Result contains direct output
-        output = result["image"]
+        # Extract output
+        output_url = result["image"]["url"]
 
-        # Download the returned image
-        image_url = output["url"]
-        final = requests.get(image_url, timeout=30)
+        # Download final image
+        final = requests.get(output_url, timeout=30)
         final.raise_for_status()
-
         return final.content
 
     except Exception as e:
         st.error(f"❌ Background removal failed: {e}")
         return None
+
 
 
 # ----------------------------------
