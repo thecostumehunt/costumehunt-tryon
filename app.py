@@ -238,14 +238,9 @@ else:
         help="Direct link to clothing image (full outfit preferred)"
     )
 
-
 import base64
 
 def remove_background(image_bytes):
-    """
-    Correct FAL rembg implementation (no upload endpoint).
-    Uses base64 input + async polling.
-    """
     if not FAL_KEY:
         st.error("❌ FAL_KEY not configured")
         return None
@@ -264,9 +259,9 @@ def remove_background(image_bytes):
             }
         }
 
-        # Start async job
+        # START JOB (NO /subscribe)
         start = requests.post(
-            "https://fal.run/fal-ai/imageutils/rembg/subscribe",
+            "https://fal.run/fal-ai/imageutils/rembg",
             json=payload,
             headers=headers,
             timeout=30
@@ -274,11 +269,13 @@ def remove_background(image_bytes):
         start.raise_for_status()
 
         request_id = start.json()["request_id"]
-        status_url = f"https://fal.run/fal-ai/imageutils/rembg/requests/{request_id}"
 
-        # Poll for result
-        for _ in range(60):  # ~2 minutes max
+        # POLL RESULT
+        status_url = f"https://fal.run/fal-ai/imageutils/rembg/{request_id}"
+
+        for _ in range(60):
             time.sleep(2)
+
             poll = requests.get(status_url, headers=headers, timeout=15)
             poll.raise_for_status()
             result = poll.json()
