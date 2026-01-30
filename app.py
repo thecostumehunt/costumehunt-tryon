@@ -1,16 +1,20 @@
 import streamlit as st
 import requests
 import os
-import streamlit.components.v1 as components
-import json
 import time
 
 # ----------------------------------
 # CONFIG
 # ----------------------------------
-st.set_page_config(page_title="The Costume Hunt – Try On", layout="centered")
+st.set_page_config(
+    page_title="The Costume Hunt – Try On",
+    layout="centered"
+)
 
-BACKEND_URL = os.getenv("BACKEND_URL", "https://tryon-backend-5wf1.onrender.com")
+BACKEND_URL = os.getenv(
+    "BACKEND_URL",
+    "https://tryon-backend-5wf1.onrender.com"
+)
 
 # ----------------------------------
 # PAGE HEADER
@@ -20,83 +24,50 @@ st.write("Upload your full-body photo and preview how a full outfit looks on you
 st.caption("Powered by TheCostumeHunt.com • Photos are processed temporarily and deleted.")
 
 # ----------------------------------
-# 🆕 LIGHT BROWSER FINGERPRINT (NON-INVASIVE)
-# ----------------------------------
-if "fingerprint" not in st.session_state:
-    components.html(
-        """
-        <script>
-        const fp = {
-          ua: navigator.userAgent,
-          platform: navigator.platform,
-          lang: navigator.language,
-          tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          screen: screen.width + "x" + screen.height
-        };
-        window.parent.postMessage(
-          { type: "FP", value: JSON.stringify(fp) },
-          "*"
-        );
-        </script>
-        """,
-        height=0,
-    )
-    st.session_state.fingerprint = None
-
-components.html(
-    """
-    <script>
-    window.addEventListener("message", (e) => {
-      if (e.data?.type === "FP") {
-        fetch("/_stcore/fingerprint", {
-          method: "POST",
-          body: e.data.value
-        });
-      }
-    });
-    </script>
-    """,
-    height=0,
-)
-
-# ----------------------------------
-# DEVICE INIT (KEEP AS IS – WORKING)
+# 🔑 DEVICE TOKEN — SINGLE SOURCE OF TRUTH
 # ----------------------------------
 query_params = st.query_params
 
-if "device_token" in query_params:
-    st.session_state.device_token = query_params["device_token"]
-else:
-    if "device_token" not in st.session_state:
-        try:
-            r = requests.get(f"{BACKEND_URL}/device/init", timeout=10)
-            data = r.json()
-            token = data["device_token"]
+def get_or_create_device_token():
+    # 1. URL has token (highest priority)
+    if "device_token" in query_params:
+        return query_params["device_token"]
 
-            st.session_state.device_token = token
-            st.query_params["device_token"] = token
+    # 2. Session already has token
+    if "device_token" in st.session_state:
+        return st.session_state.device_token
 
-        except Exception:
-            st.error("❌ Backend not reachable.")
-            st.stop()
+    # 3. Create new device
+    r = requests.get(f"{BACKEND_URL}/device/init", timeout=10)
+    r.raise_for_status()
+    token = r.json()["device_token"]
+
+    # normalize URL (VERY IMPORTANT)
+    st.query_params.clear()
+    st.query_params["device_token"] = token
+
+    return token
+
+try:
+    st.session_state.device_token = get_or_create_device_token()
+except Exception:
+    st.error("❌ Backend not reachable.")
+    st.stop()
 
 def api_headers():
-    headers = {
+    return {
         "Authorization": f"Bearer {st.session_state.device_token}",
         "Content-Type": "application/json",
     }
-    if st.session_state.get("fingerprint"):
-        headers["X-Fingerprint"] = st.session_state.fingerprint
-    return headers
 
 # ----------------------------------
-# PAYMENT SUCCESS MESSAGE
+# PAYMENT SUCCESS MESSAGE (UI ONLY)
 # ----------------------------------
 if query_params.get("checkout") == "success":
-    st.success("🎉 Payment successful! Credits have been added to your account.")
+    st.success("🎉 Payment successful! Credits have been added.")
 
 # ----------------------------------
-# FETCH CREDITS
+# FETCH CREDITS (AUTHORITATIVE)
 # ----------------------------------
 credits_data = None
 try:
@@ -117,7 +88,10 @@ if credits_data:
 # ----------------------------------
 if "last_image" in st.session_state:
     st.subheader("🖼 Your last try-on result")
-    st.image(st.session_state.last_image, use_container_width=True)
+    st.image(
+        st.session_state.last_image,
+        use_container_width=True
+    )
 
     try:
         img_bytes = requests.get(st.session_state.last_image).content
@@ -131,7 +105,7 @@ if "last_image" in st.session_state:
         pass
 
 # ----------------------------------
-# FREE UNLOCK (UNCHANGED – BACKEND MUST ENFORCE)
+# FREE UNLOCK
 # ----------------------------------
 if credits_data and credits_data["credits"] == 0 and not credits_data.get("free_used", True):
     st.subheader("🎁 Get your free try")
@@ -155,7 +129,7 @@ if credits_data and credits_data["credits"] == 0 and not credits_data.get("free_
             st.error(f"Error: {str(e)}")
 
 # ----------------------------------
-# PAYMENT HELPER (DO NOT MODIFY URL)
+# PAYMENT HELPER (DO NOT TOUCH URL)
 # ----------------------------------
 def create_checkout(pack: int):
     try:
@@ -164,8 +138,9 @@ def create_checkout(pack: int):
             headers=api_headers(),
             timeout=20
         )
+
         if r.status_code == 200:
-            return r.json().get("checkout_url")
+            return r.json()["checkout_url"]
 
         st.error("❌ Backend error while creating checkout")
         st.code(r.text)
@@ -183,7 +158,7 @@ if credits_data and credits_data["credits"] == 0:
 
     st.markdown("---")
     st.subheader("✨ Buy Credits")
-    st.write("Instant credits via LemonSqueezy")
+    st.write("Secure checkout via LemonSqueezy")
 
     c1, c2, c3 = st.columns(3)
 
@@ -225,7 +200,7 @@ else:
 st.subheader("3. Generate try-on")
 
 # ----------------------------------
-# 🆕 CLIENT-SIDE COOLDOWN (ANTI-SPAM)
+# CLIENT-SIDE COOLDOWN (UX ONLY)
 # ----------------------------------
 now = time.time()
 last_try = st.session_state.get("last_try_time", 0)
