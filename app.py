@@ -241,17 +241,35 @@ else:
 
 
 from rembg import remove
+from PIL import Image
+import io
 
 def remove_background(image_bytes):
     """
-    Local background removal using rembg.
-    Fast, free, no API calls.
+    Remove background and place subject on WHITE background.
     """
     try:
-        return remove(image_bytes)
+        # Step 1: remove background (transparent PNG)
+        transparent_bytes = remove(image_bytes)
+
+        # Step 2: load as RGBA
+        img = Image.open(io.BytesIO(transparent_bytes)).convert("RGBA")
+
+        # Step 3: create white background
+        white_bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
+
+        # Step 4: composite subject over white
+        final_img = Image.alpha_composite(white_bg, img)
+
+        # Step 5: export as PNG (no transparency anymore)
+        output = io.BytesIO()
+        final_img.convert("RGB").save(output, format="PNG")
+        return output.getvalue()
+
     except Exception as e:
         st.error(f"❌ Background removal failed: {e}")
         return None
+
 
 
 # ----------------------------------
