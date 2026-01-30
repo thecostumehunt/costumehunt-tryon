@@ -112,7 +112,7 @@ if query_params.get("checkout") == "success":
 # ----------------------------------
 # FETCH CREDITS (SOURCE OF TRUTH)
 # ----------------------------------
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=5)
 def get_credits():
     try:
         r = requests.get(
@@ -163,6 +163,7 @@ if credits_data and credits_data["credits"] == 0 and not credits_data.get("free_
                 timeout=10
             )
             if r.status_code == 200:
+                st.cache_data.clear()
                 st.success("✅ Free try unlocked!")
                 st.rerun()
             else:
