@@ -26,21 +26,28 @@ if "device_token" not in st.session_state:
         if "device_token" in data:
             st.session_state.device_token = data["device_token"]
         st.session_state.device = data
-    except:
+    except Exception:
         st.error("❌ Backend not reachable.")
         st.stop()
 
 def api_headers():
-    return {"Authorization": f"Bearer {st.session_state.device_token}"}
+    return {
+        "Authorization": f"Bearer {st.session_state.device_token}",
+        "Content-Type": "application/json"
+    }
 
 # ----------------------------------
 # FETCH CREDITS
 # ----------------------------------
 credits_data = None
 try:
-    r = requests.get(f"{BACKEND_URL}/credits", headers=api_headers(), timeout=10)
+    r = requests.get(
+        f"{BACKEND_URL}/credits",
+        headers=api_headers(),
+        timeout=10
+    )
     credits_data = r.json()
-except:
+except Exception:
     st.warning("⚠️ Could not fetch credits.")
 
 if credits_data:
@@ -61,7 +68,7 @@ if "last_image" in st.session_state:
             file_name="tryon.png",
             mime="image/png"
         )
-    except:
+    except Exception:
         pass
 
 # ----------------------------------
@@ -75,7 +82,7 @@ if credits_data and credits_data["credits"] == 0 and not credits_data.get("free_
         try:
             r = requests.post(
                 f"{BACKEND_URL}/free/unlock",
-                headers={**api_headers(), "Content-Type": "application/json"},
+                headers=api_headers(),
                 json={"email": email},
                 timeout=10
             )
@@ -83,32 +90,33 @@ if credits_data and credits_data["credits"] == 0 and not credits_data.get("free_
                 st.success("✅ Free try unlocked!")
                 st.rerun()
             else:
-                st.error(f"Unlock failed: {r.text[:100]}")
+                st.error("❌ Unlock failed")
+                st.code(r.text)
         except Exception as e:
             st.error(f"Error: {str(e)}")
 
 # ----------------------------------
-# PAYMENT HELPERS - PERFECTLY MATCHES YOUR BACKEND
+# PAYMENT HELPER
 # ----------------------------------
-def create_checkout(pack):
-    """Your backend expects ?pack={pack} - FIXED"""
+def create_checkout(pack: int):
     try:
         r = requests.post(
             f"{BACKEND_URL}/lemon/create-link?pack={pack}",
             headers=api_headers(),
-            timeout=15
+            timeout=20
         )
-        
+
         if r.status_code == 200:
             data = r.json()
             return data.get("checkout_url")
-        else:
-            st.error(f"Backend error {r.status_code}: {r.text[:200]}")
-            st.info("🔧 Fix: Add LEMON_SQUEEZY_API_KEY to Render backend")
-            return None
-            
+
+        st.error("❌ Backend error while creating checkout")
+        st.code(r.text, language="json")
+        return None
+
     except Exception as e:
-        st.error(f"Connection error: {str(e)[:100]}")
+        st.error("❌ Connection error")
+        st.code(str(e))
         return None
 
 # ----------------------------------
@@ -118,7 +126,7 @@ if credits_data and credits_data["credits"] == 0:
 
     st.markdown("---")
     st.subheader("✨ Buy Credits")
-    st.write("Instant credits via LemonSqueezy (automatic webhook sync)")
+    st.write("Instant credits via LemonSqueezy (test mode)")
 
     c1, c2, c3 = st.columns(3)
 
@@ -131,9 +139,6 @@ if credits_data and credits_data["credits"] == 0:
                 if link:
                     st.success("✅ Checkout ready!")
                     st.link_button("👉 Pay $2 Now", link, use_container_width=True, type="primary")
-                    st.balloons()
-                else:
-                    st.error("❌ Backend needs LemonSqueezy API key")
 
     with c2:
         st.markdown("**15 tries**")
@@ -144,8 +149,6 @@ if credits_data and credits_data["credits"] == 0:
                 if link:
                     st.success("✅ Checkout ready!")
                     st.link_button("👉 Pay $5 Now", link, use_container_width=True, type="primary")
-                else:
-                    st.error("❌ Backend needs LemonSqueezy API key")
 
     with c3:
         st.markdown("**100 tries**")
@@ -156,11 +159,9 @@ if credits_data and credits_data["credits"] == 0:
                 if link:
                     st.success("✅ Checkout ready!")
                     st.link_button("👉 Pay $20 Now", link, use_container_width=True, type="primary")
-                else:
-                    st.error("❌ Backend needs LemonSqueezy API key")
 
     st.markdown("---")
-    st.caption("💡 After payment, refresh page → credits auto-added via webhook")
+    st.caption("💡 Test payments only • Credits added via webhook")
 
 # ----------------------------------
 # USER INPUTS
@@ -173,7 +174,7 @@ user_image = st.file_uploader(
 
 st.subheader("2. Outfit image")
 query_params = st.query_params
-cloth_url = query_params.get("cloth", None)
+cloth_url = query_params.get("cloth")
 
 if cloth_url:
     st.image(cloth_url, caption="Selected outfit", width=260)
@@ -192,7 +193,7 @@ if st.button("✨ Try it on", use_container_width=True):
         st.stop()
 
     if not credits_data or credits_data["credits"] < 1:
-        st.warning("You need credits! Buy above or unlock free try.")
+        st.warning("You need credits to continue.")
         st.stop()
 
     with st.spinner("🎨 Creating virtual try-on (~30s)..."):
@@ -201,7 +202,7 @@ if st.button("✨ Try it on", use_container_width=True):
 
         r = requests.post(
             f"{BACKEND_URL}/tryon",
-            headers=api_headers(),
+            headers={"Authorization": api_headers()["Authorization"]},
             params=params,
             files=files,
             timeout=300
@@ -213,7 +214,8 @@ if st.button("✨ Try it on", use_container_width=True):
             st.success("🎉 Try-on ready!")
             st.rerun()
         else:
-            st.error(f"Try-on failed: {r.status_code}")
+            st.error("❌ Try-on failed")
+            st.code(r.text)
 
 # ----------------------------------
 # FOOTER
@@ -221,4 +223,5 @@ if st.button("✨ Try it on", use_container_width=True):
 st.markdown("---")
 st.write("🔒 Photos deleted after processing")
 st.write("🩷 TheCostumeHunt.com")
+
 
