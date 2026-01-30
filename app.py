@@ -79,6 +79,7 @@ def api_headers():
 # ----------------------------------
 if query_params.get("checkout") == "success":
     st.success("🎉 Payment successful! Credits have been added.")
+    st.rerun()
 
 # ----------------------------------
 # FETCH CREDITS (SOURCE OF TRUTH)
