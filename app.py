@@ -1,17 +1,13 @@
 import streamlit as st
 import requests
 import os
-from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 # ----------------------------------
 # CONFIG
 # ----------------------------------
 st.set_page_config(page_title="The Costume Hunt – Try On", layout="centered")
 
-BACKEND_URL = os.getenv(
-    "BACKEND_URL",
-    "https://tryon-backend-5wf1.onrender.com"
-)
+BACKEND_URL = os.getenv("BACKEND_URL", "https://tryon-backend-5wf1.onrender.com")
 
 # ----------------------------------
 # PAGE HEADER
@@ -21,15 +17,15 @@ st.write("Upload your full-body photo and preview how a full outfit looks on you
 st.caption("Powered by TheCostumeHunt.com • Photos are processed temporarily and deleted.")
 
 # ----------------------------------
-# DEVICE INIT (PERSIST VIA URL)
+# DEVICE INIT (🔑 FIXED HERE)
 # ----------------------------------
 query_params = st.query_params
 
 if "device_token" in query_params:
-    # Returning from Lemon or reload
+    # ✅ returning user (after checkout)
     st.session_state.device_token = query_params["device_token"]
 else:
-    # First visit
+    # ✅ first-time user
     if "device_token" not in st.session_state:
         try:
             r = requests.get(f"{BACKEND_URL}/device/init", timeout=10)
@@ -38,7 +34,7 @@ else:
 
             st.session_state.device_token = token
 
-            # persist device in URL
+            # 🔒 persist device across reloads & Lemon return
             st.query_params["device_token"] = token
 
         except Exception:
@@ -52,10 +48,10 @@ def api_headers():
     }
 
 # ----------------------------------
-# PAYMENT SUCCESS MESSAGE
+# OPTIONAL PAYMENT SUCCESS MESSAGE
 # ----------------------------------
 if query_params.get("checkout") == "success":
-    st.success("🎉 Payment successful! Credits have been added.")
+    st.success("🎉 Payment successful! Credits have been added to your account.")
 
 # ----------------------------------
 # FETCH CREDITS
@@ -117,7 +113,7 @@ if credits_data and credits_data["credits"] == 0 and not credits_data.get("free_
             st.error(f"Error: {str(e)}")
 
 # ----------------------------------
-# PAYMENT HELPER (🔑 FIX IS HERE)
+# PAYMENT HELPER
 # ----------------------------------
 def create_checkout(pack: int):
     try:
@@ -128,18 +124,7 @@ def create_checkout(pack: int):
         )
 
         if r.status_code == 200:
-            checkout_url = r.json().get("checkout_url")
-
-            # 🔑 APPEND DEVICE TOKEN TO RETURN URL
-            parsed = urlparse(checkout_url)
-            qs = parse_qs(parsed.query)
-            qs["device_token"] = st.session_state.device_token
-            qs["checkout"] = "success"
-
-            new_query = urlencode(qs, doseq=True)
-            final_url = urlunparse(parsed._replace(query=new_query))
-
-            return final_url
+            return r.json().get("checkout_url")
 
         st.error("❌ Backend error while creating checkout")
         st.code(r.text)
@@ -151,13 +136,13 @@ def create_checkout(pack: int):
         return None
 
 # ----------------------------------
-# BUY CREDITS UI (UNCHANGED UX)
+# BUY CREDITS UI (UNCHANGED)
 # ----------------------------------
 if credits_data and credits_data["credits"] == 0:
 
     st.markdown("---")
     st.subheader("✨ Buy Credits")
-    st.write("You’ll complete payment on a secure checkout page and return here.")
+    st.write("Instant credits via LemonSqueezy")
 
     c1, c2, c3 = st.columns(3)
 
@@ -244,3 +229,4 @@ if st.button("✨ Try it on", use_container_width=True):
 st.markdown("---")
 st.write("🔒 Photos deleted after processing")
 st.write("🩷 TheCostumeHunt.com")
+
