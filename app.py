@@ -48,6 +48,57 @@ def init_device_safely():
         timeout=10
     )
     r.raise_for_status()
+   ```python
+import streamlit as st
+import requests
+import os
+import time
+import hashlib
+
+# ----------------------------------
+# CONFIG
+# ----------------------------------
+st.set_page_config(
+    page_title="The Costume Hunt – Try On",
+    layout="centered"
+)
+
+BACKEND_URL = st.secrets.get(
+    "BACKEND_URL",
+    os.getenv("BACKEND_URL", "https://tryon-backend-5wf1.onrender.com")
+)
+
+# Generate stable browser fingerprint
+FINGERPRINT = hashlib.sha256(f"{BACKEND_URL}".encode()).hexdigest()
+
+# ----------------------------------
+# PAGE HEADER
+# ----------------------------------
+st.title("👗 Try This Outfit On Yourself")
+st.write("Upload your full-body photo and preview how a full outfit looks on you.")
+st.caption("Powered by TheCostumeHunt.com • Photos are processed temporarily and deleted.")
+
+# ----------------------------------
+# 🔑 DEVICE TOKEN — SAFE & DEFENSIVE
+# ----------------------------------
+query_params = st.query_params
+
+def init_device_safely():
+    # 1️⃣ token already in URL
+    if "device_token" in query_params:
+        return query_params["device_token"]
+
+    # 2️⃣ token already in session
+    if "device_token" in st.session_state:
+        return st.session_state.device_token
+
+    # 3️⃣ ask backend (with fingerprint)
+    r = requests.get(
+        f"{BACKEND_URL}/device/init", 
+        headers={"X-Fingerprint": FINGERPRINT},
+        timeout=10
+    )
+    r.raise_for_status()
     data = r.json()
 
     token = data.get("device_token")
@@ -80,11 +131,20 @@ def api_headers():
         "X-Fingerprint": FINGERPRINT  # Always include fingerprint
     }
 
+# DEBUG INFO (remove after testing)
+st.sidebar.write(f"🔑 Device Token: {st.session_state.device_token}")
+st.sidebar.write(f"🖐️ Fingerprint: {FINGERPRINT}")
+
 # ----------------------------------
 # PAYMENT SUCCESS MESSAGE (UI ONLY)
 # ----------------------------------
 if query_params.get("checkout") == "success":
-    st.success("🎉 Payment successful! Credits have been added.")
+    # Preserve original device_token from session
+    original_token = st.session_state.get("device_token")
+    if original_token:
+        st.query_params.clear()
+        st.query_params["device_token"] = original_token
+    st.success("🎉 Payment successful! Credits added.")
     st.rerun()  # Auto-refresh credits display
 
 # ----------------------------------
