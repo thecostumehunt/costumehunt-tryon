@@ -1,6 +1,9 @@
 import streamlit as st
 import requests
 import os
+import streamlit.components.v1 as components
+import json
+import time
 
 # ----------------------------------
 # CONFIG
@@ -17,15 +20,53 @@ st.write("Upload your full-body photo and preview how a full outfit looks on you
 st.caption("Powered by TheCostumeHunt.com • Photos are processed temporarily and deleted.")
 
 # ----------------------------------
-# DEVICE INIT (🔑 FIXED HERE)
+# 🆕 LIGHT BROWSER FINGERPRINT (NON-INVASIVE)
+# ----------------------------------
+if "fingerprint" not in st.session_state:
+    components.html(
+        """
+        <script>
+        const fp = {
+          ua: navigator.userAgent,
+          platform: navigator.platform,
+          lang: navigator.language,
+          tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          screen: screen.width + "x" + screen.height
+        };
+        window.parent.postMessage(
+          { type: "FP", value: JSON.stringify(fp) },
+          "*"
+        );
+        </script>
+        """,
+        height=0,
+    )
+    st.session_state.fingerprint = None
+
+components.html(
+    """
+    <script>
+    window.addEventListener("message", (e) => {
+      if (e.data?.type === "FP") {
+        fetch("/_stcore/fingerprint", {
+          method: "POST",
+          body: e.data.value
+        });
+      }
+    });
+    </script>
+    """,
+    height=0,
+)
+
+# ----------------------------------
+# DEVICE INIT (KEEP AS IS – WORKING)
 # ----------------------------------
 query_params = st.query_params
 
 if "device_token" in query_params:
-    # ✅ returning user (after checkout)
     st.session_state.device_token = query_params["device_token"]
 else:
-    # ✅ first-time user
     if "device_token" not in st.session_state:
         try:
             r = requests.get(f"{BACKEND_URL}/device/init", timeout=10)
@@ -33,8 +74,6 @@ else:
             token = data["device_token"]
 
             st.session_state.device_token = token
-
-            # 🔒 persist device across reloads & Lemon return
             st.query_params["device_token"] = token
 
         except Exception:
@@ -42,13 +81,16 @@ else:
             st.stop()
 
 def api_headers():
-    return {
+    headers = {
         "Authorization": f"Bearer {st.session_state.device_token}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
     }
+    if st.session_state.get("fingerprint"):
+        headers["X-Fingerprint"] = st.session_state.fingerprint
+    return headers
 
 # ----------------------------------
-# OPTIONAL PAYMENT SUCCESS MESSAGE
+# PAYMENT SUCCESS MESSAGE
 # ----------------------------------
 if query_params.get("checkout") == "success":
     st.success("🎉 Payment successful! Credits have been added to your account.")
@@ -89,7 +131,7 @@ if "last_image" in st.session_state:
         pass
 
 # ----------------------------------
-# FREE UNLOCK
+# FREE UNLOCK (UNCHANGED – BACKEND MUST ENFORCE)
 # ----------------------------------
 if credits_data and credits_data["credits"] == 0 and not credits_data.get("free_used", True):
     st.subheader("🎁 Get your free try")
@@ -113,7 +155,7 @@ if credits_data and credits_data["credits"] == 0 and not credits_data.get("free_
             st.error(f"Error: {str(e)}")
 
 # ----------------------------------
-# PAYMENT HELPER
+# PAYMENT HELPER (DO NOT MODIFY URL)
 # ----------------------------------
 def create_checkout(pack: int):
     try:
@@ -122,7 +164,6 @@ def create_checkout(pack: int):
             headers=api_headers(),
             timeout=20
         )
-
         if r.status_code == 200:
             return r.json().get("checkout_url")
 
@@ -136,7 +177,7 @@ def create_checkout(pack: int):
         return None
 
 # ----------------------------------
-# BUY CREDITS UI (UNCHANGED)
+# BUY CREDITS UI
 # ----------------------------------
 if credits_data and credits_data["credits"] == 0:
 
@@ -147,28 +188,22 @@ if credits_data and credits_data["credits"] == 0:
     c1, c2, c3 = st.columns(3)
 
     with c1:
-        st.markdown("**5 tries**")
-        st.markdown("$2")
-        if st.button("💳 Buy 5 credits", key="buy5", use_container_width=True):
+        if st.button("💳 Buy 5 credits ($2)", use_container_width=True):
             link = create_checkout(5)
             if link:
-                st.link_button("👉 Pay $2 Now", link, use_container_width=True, type="primary")
+                st.link_button("👉 Continue to checkout", link, type="primary")
 
     with c2:
-        st.markdown("**15 tries**")
-        st.markdown("$5")
-        if st.button("💳 Buy 15 credits", key="buy15", use_container_width=True):
+        if st.button("💳 Buy 15 credits ($5)", use_container_width=True):
             link = create_checkout(15)
             if link:
-                st.link_button("👉 Pay $5 Now", link, use_container_width=True, type="primary")
+                st.link_button("👉 Continue to checkout", link, type="primary")
 
     with c3:
-        st.markdown("**100 tries**")
-        st.markdown("$20")
-        if st.button("💳 Buy 100 credits", key="buy100", use_container_width=True):
+        if st.button("💳 Buy 100 credits ($20)", use_container_width=True):
             link = create_checkout(100)
             if link:
-                st.link_button("👉 Pay $20 Now", link, use_container_width=True, type="primary")
+                st.link_button("👉 Continue to checkout", link, type="primary")
 
 # ----------------------------------
 # USER INPUTS
@@ -190,9 +225,18 @@ else:
 st.subheader("3. Generate try-on")
 
 # ----------------------------------
-# TRY-ON
+# 🆕 CLIENT-SIDE COOLDOWN (ANTI-SPAM)
 # ----------------------------------
+now = time.time()
+last_try = st.session_state.get("last_try_time", 0)
+
 if st.button("✨ Try it on", use_container_width=True):
+
+    if now - last_try < 20:
+        st.warning("⏳ Please wait a few seconds before trying again.")
+        st.stop()
+
+    st.session_state.last_try_time = now
 
     if not user_image or not cloth_url:
         st.warning("Please upload your photo and provide outfit image.")
@@ -229,4 +273,3 @@ if st.button("✨ Try it on", use_container_width=True):
 st.markdown("---")
 st.write("🔒 Photos deleted after processing")
 st.write("🩷 TheCostumeHunt.com")
-
