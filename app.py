@@ -5,7 +5,6 @@ import time
 import hashlib
 import io
 from PIL import Image
-import fal_client
 
 # ----------------------------------
 # CONFIG
@@ -20,9 +19,8 @@ BACKEND_URL = st.secrets.get(
     os.getenv("BACKEND_URL", "https://tryon-backend-5wf1.onrender.com")
 )
 
-# FAL Key (add to Streamlit secrets as FAL_KEY)
+# FAL Key (add to Streamlit secrets or environment)
 FAL_KEY = st.secrets.get("FAL_KEY", os.getenv("FAL_KEY"))
-FAL_CLIENT = fal_client.FalClient(key=FAL_KEY) if FAL_KEY else None
 
 # Generate stable browser fingerprint
 FINGERPRINT = hashlib.sha256(f"{BACKEND_URL}".encode()).hexdigest()
@@ -241,33 +239,51 @@ else:
     )
 
 # ----------------------------------
-# BACKGROUND REMOVAL FUNCTION
+# BACKGROUND REMOVAL FUNCTION (HTTP API)
 # ----------------------------------
 def remove_background(image_bytes):
-    """Remove background from image using FAL rembg API"""
-    if not FAL_CLIENT:
+    """Remove background from image using FAL HTTP API"""
+    if not FAL_KEY:
         st.error("❌ FAL_KEY not configured in secrets")
         return None
     
     try:
-        # Upload image to FAL storage first (needed for API)
-        image_file = io.BytesIO(image_bytes)
-        uploaded_url = FAL_CLIENT.storage.upload(image_file)
+        # First upload image to get URL
+        upload_files = {'image': ('image.png', image_bytes, 'image/png')}
+        upload_headers = {'Authorization': f'Key {FAL_KEY}'}
         
-        # Remove background using fal-ai/imageutils/rembg
-        result = FAL_CLIENT.subscribe("fal-ai/imageutils/rembg", {
-            "input": {
-                "image_url": uploaded_url
-            }
-        })
+        upload_response = requests.post(
+            'https://fal.run/fal-ai/imageutils/rembg/upload',
+            files=upload_files,
+            headers=upload_headers,
+            timeout=30
+        )
+        upload_response.raise_for_status()
+        image_url = upload_response.json()['url']
         
-        # Download the processed image
-        bg_removed_url = result['data']['image']['url']
-        response = requests.get(bg_removed_url)
-        response.raise_for_status()
+        # Remove background
+        rembg_payload = {
+            'input': {'image_url': image_url}
+        }
+        rembg_headers = {
+            'Authorization': f'Key {FAL_KEY}',
+            'Content-Type': 'application/json'
+        }
         
-        st.success("✅ Background removed successfully!")
-        return response.content
+        result = requests.post(
+            'https://fal.run/fal-ai/imageutils/rembg',
+            json=rembg_payload,
+            headers=rembg_headers,
+            timeout=60
+        ).json()
+        
+        # Download result
+        result_url = result['data']['image']['url']
+        final_response = requests.get(result_url, timeout=30)
+        final_response.raise_for_status()
+        
+        st.success("✅ Background removed!")
+        return final_response.content
         
     except Exception as e:
         st.error(f"❌ Background removal failed: {str(e)[:100]}")
@@ -307,12 +323,9 @@ if generate_btn:
     # UPDATE COOLDOWN
     st.session_state.last_try_time = now
 
-    # DEBUG INFO
-    st.info(f"🚀 Sending request to backend... (token: {st.session_state.device_token[:8] if st.session_state.device_token else 'anon'})")
-
     with st.spinner("🎨 Creating virtual try-on (~30-60s)..."):
         try:
-            # STEP 1: Remove background from user image FIRST
+            # STEP 1: Remove background
             st.info("🧹 Step 1/2: Removing background...")
             original_image_bytes = user_image.getvalue()
             clean_image_bytes = remove_background(original_image_bytes)
@@ -333,8 +346,6 @@ if generate_btn:
                 files=files,
                 timeout=300
             )
-
-            st.info(f"📊 Response: {r.status_code}")
 
             if r.status_code == 200:
                 data = r.json()
