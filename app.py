@@ -24,23 +24,17 @@ st.write("Upload your full-body photo and preview how a full outfit looks on you
 st.caption("Powered by TheCostumeHunt.com • Photos are processed temporarily and deleted.")
 
 # ----------------------------------
-# 🔑 DEVICE TOKEN (SINGLE SOURCE OF TRUTH)
+# 🔑 DEVICE TOKEN — SINGLE SOURCE OF TRUTH
 # ----------------------------------
 query_params = st.query_params
 
+
 def get_or_create_device_token():
-    # 1️⃣ token already in URL (after checkout return)
+    # 1️⃣ token already in URL
     if "device_token" in query_params:
         token = query_params["device_token"]
-
-        # 🔒 JWT sanity check (must have 2 dots)
         if isinstance(token, str) and token.count(".") == 2:
             return token
-
-        # corrupted token → reset
-        st.query_params.clear()
-        st.session_state.clear()
-        st.rerun()
 
     # 2️⃣ token already in session
     if "device_token" in st.session_state:
@@ -49,16 +43,20 @@ def get_or_create_device_token():
     # 3️⃣ create new device
     r = requests.get(f"{BACKEND_URL}/device/init", timeout=10)
     r.raise_for_status()
+    data = r.json()
 
-    token = r.json()["device_token"]
+    token = data.get("device_token")
+    if not token:
+        raise RuntimeError("Backend did not return device_token")
 
-    # persist token in URL (critical)
+    # normalize URL (critical)
     st.query_params.clear()
     st.query_params["device_token"] = token
 
     return token
 
 
+# ---- initialize device ----
 try:
     st.session_state.device_token = get_or_create_device_token()
 except Exception as e:
@@ -94,9 +92,9 @@ try:
 except Exception as e:
     st.error("❌ Failed to fetch credits")
     st.code(str(e))
-    st.stop()
 
-st.info(f"💳 Credits left: {credits_data['credits']}")
+if credits_data:
+    st.info(f"💳 Credits left: {credits_data['credits']}")
 
 # ----------------------------------
 # SHOW LAST RESULT
@@ -113,16 +111,15 @@ if "last_image" in st.session_state:
             file_name="tryon.png",
             mime="image/png"
         )
-    except:
+    except Exception:
         pass
 
 # ----------------------------------
-# FREE UNLOCK (BACKEND ENFORCES ABUSE RULES)
+# FREE UNLOCK (BACKEND ENFORCED)
 # ----------------------------------
-if credits_data["credits"] == 0 and not credits_data.get("free_used", True):
-
+if credits_data and credits_data["credits"] == 0 and not credits_data.get("free_used", True):
     st.subheader("🎁 Get your free try")
-    email = st.text_input("Enter your email")
+    email = st.text_input("Enter your email to unlock your free try")
 
     if st.button("Unlock free try"):
         try:
@@ -132,16 +129,14 @@ if credits_data["credits"] == 0 and not credits_data.get("free_used", True):
                 json={"email": email},
                 timeout=10
             )
-
             if r.status_code == 200:
-                st.success("✅ Free credit unlocked!")
+                st.success("✅ Free try unlocked!")
                 st.rerun()
             else:
-                st.error("❌ Free credit unavailable")
+                st.error("❌ Unlock failed")
                 st.code(r.text)
-
         except Exception as e:
-            st.error("❌ Error unlocking free credit")
+            st.error("❌ Request failed")
             st.code(str(e))
 
 # ----------------------------------
@@ -156,22 +151,21 @@ def create_checkout(pack: int):
         )
 
         if r.status_code == 200:
-            return r.json()["checkout_url"]
+            return r.json().get("checkout_url")
 
-        st.error("❌ Checkout creation failed")
+        st.error("❌ Backend error while creating checkout")
         st.code(r.text)
         return None
 
     except Exception as e:
-        st.error("❌ Backend error")
+        st.error("❌ Connection error")
         st.code(str(e))
         return None
 
 # ----------------------------------
 # BUY CREDITS UI
 # ----------------------------------
-if credits_data["credits"] == 0:
-
+if credits_data and credits_data["credits"] == 0:
     st.markdown("---")
     st.subheader("✨ Buy Credits")
     st.write("Secure checkout via LemonSqueezy")
@@ -233,7 +227,7 @@ if st.button("✨ Try it on", use_container_width=True):
         st.warning("Please upload your photo and provide outfit image.")
         st.stop()
 
-    if credits_data["credits"] < 1:
+    if not credits_data or credits_data["credits"] < 1:
         st.warning("You need credits to continue.")
         st.stop()
 
@@ -264,3 +258,4 @@ if st.button("✨ Try it on", use_container_width=True):
 st.markdown("---")
 st.write("🔒 Photos deleted after processing")
 st.write("🩷 TheCostumeHunt.com")
+
