@@ -17,24 +17,41 @@ st.write("Upload your full-body photo and preview how a full outfit looks on you
 st.caption("Powered by TheCostumeHunt.com • Photos are processed temporarily and deleted.")
 
 # ----------------------------------
-# DEVICE INIT
+# DEVICE INIT (🔑 FIXED HERE)
 # ----------------------------------
-if "device_token" not in st.session_state:
-    try:
-        r = requests.get(f"{BACKEND_URL}/device/init", timeout=10)
-        data = r.json()
-        if "device_token" in data:
-            st.session_state.device_token = data["device_token"]
-        st.session_state.device = data
-    except Exception:
-        st.error("❌ Backend not reachable.")
-        st.stop()
+query_params = st.query_params
+
+if "device_token" in query_params:
+    # ✅ returning user (after checkout)
+    st.session_state.device_token = query_params["device_token"]
+else:
+    # ✅ first-time user
+    if "device_token" not in st.session_state:
+        try:
+            r = requests.get(f"{BACKEND_URL}/device/init", timeout=10)
+            data = r.json()
+            token = data["device_token"]
+
+            st.session_state.device_token = token
+
+            # 🔒 persist device across reloads & Lemon return
+            st.query_params["device_token"] = token
+
+        except Exception:
+            st.error("❌ Backend not reachable.")
+            st.stop()
 
 def api_headers():
     return {
         "Authorization": f"Bearer {st.session_state.device_token}",
         "Content-Type": "application/json"
     }
+
+# ----------------------------------
+# OPTIONAL PAYMENT SUCCESS MESSAGE
+# ----------------------------------
+if query_params.get("checkout") == "success":
+    st.success("🎉 Payment successful! Credits have been added to your account.")
 
 # ----------------------------------
 # FETCH CREDITS
@@ -107,11 +124,10 @@ def create_checkout(pack: int):
         )
 
         if r.status_code == 200:
-            data = r.json()
-            return data.get("checkout_url")
+            return r.json().get("checkout_url")
 
         st.error("❌ Backend error while creating checkout")
-        st.code(r.text, language="json")
+        st.code(r.text)
         return None
 
     except Exception as e:
@@ -120,13 +136,13 @@ def create_checkout(pack: int):
         return None
 
 # ----------------------------------
-# BUY CREDITS UI
+# BUY CREDITS UI (UNCHANGED)
 # ----------------------------------
 if credits_data and credits_data["credits"] == 0:
 
     st.markdown("---")
     st.subheader("✨ Buy Credits")
-    st.write("Instant credits via LemonSqueezy (test mode)")
+    st.write("Instant credits via LemonSqueezy")
 
     c1, c2, c3 = st.columns(3)
 
@@ -134,34 +150,25 @@ if credits_data and credits_data["credits"] == 0:
         st.markdown("**5 tries**")
         st.markdown("$2")
         if st.button("💳 Buy 5 credits", key="buy5", use_container_width=True):
-            with st.spinner("🔄 Creating checkout..."):
-                link = create_checkout(5)
-                if link:
-                    st.success("✅ Checkout ready!")
-                    st.link_button("👉 Pay $2 Now", link, use_container_width=True, type="primary")
+            link = create_checkout(5)
+            if link:
+                st.link_button("👉 Pay $2 Now", link, use_container_width=True, type="primary")
 
     with c2:
         st.markdown("**15 tries**")
         st.markdown("$5")
         if st.button("💳 Buy 15 credits", key="buy15", use_container_width=True):
-            with st.spinner("🔄 Creating checkout..."):
-                link = create_checkout(15)
-                if link:
-                    st.success("✅ Checkout ready!")
-                    st.link_button("👉 Pay $5 Now", link, use_container_width=True, type="primary")
+            link = create_checkout(15)
+            if link:
+                st.link_button("👉 Pay $5 Now", link, use_container_width=True, type="primary")
 
     with c3:
         st.markdown("**100 tries**")
         st.markdown("$20")
         if st.button("💳 Buy 100 credits", key="buy100", use_container_width=True):
-            with st.spinner("🔄 Creating checkout..."):
-                link = create_checkout(100)
-                if link:
-                    st.success("✅ Checkout ready!")
-                    st.link_button("👉 Pay $20 Now", link, use_container_width=True, type="primary")
-
-    st.markdown("---")
-    st.caption("💡 Test payments only • Credits added via webhook")
+            link = create_checkout(100)
+            if link:
+                st.link_button("👉 Pay $20 Now", link, use_container_width=True, type="primary")
 
 # ----------------------------------
 # USER INPUTS
@@ -173,7 +180,6 @@ user_image = st.file_uploader(
 )
 
 st.subheader("2. Outfit image")
-query_params = st.query_params
 cloth_url = query_params.get("cloth")
 
 if cloth_url:
@@ -223,4 +229,3 @@ if st.button("✨ Try it on", use_container_width=True):
 st.markdown("---")
 st.write("🔒 Photos deleted after processing")
 st.write("🩷 TheCostumeHunt.com")
-
