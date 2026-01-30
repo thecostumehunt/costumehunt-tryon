@@ -246,7 +246,9 @@ def remove_background(image_bytes):
         return None
 
     try:
-        image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+        # Convert to DATA URL (this is the key fix)
+        image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+        data_url = f"data:image/png;base64,{image_b64}"
 
         headers = {
             "Authorization": f"Key {FAL_KEY}",
@@ -255,11 +257,11 @@ def remove_background(image_bytes):
 
         payload = {
             "input": {
-                "image_base64": image_base64
+                "image_url": data_url
             }
         }
 
-        # START JOB (NO /subscribe)
+        # Start job
         start = requests.post(
             "https://fal.run/fal-ai/imageutils/rembg",
             json=payload,
@@ -270,12 +272,11 @@ def remove_background(image_bytes):
 
         request_id = start.json()["request_id"]
 
-        # POLL RESULT
+        # Poll result
         status_url = f"https://fal.run/fal-ai/imageutils/rembg/{request_id}"
 
         for _ in range(60):
             time.sleep(2)
-
             poll = requests.get(status_url, headers=headers, timeout=15)
             poll.raise_for_status()
             result = poll.json()
