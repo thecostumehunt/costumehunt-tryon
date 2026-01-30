@@ -21,12 +21,12 @@ BACKEND_URL = st.secrets.get(
 )
 
 # ⚠️ ADD YOUR FAL.AI KEY
-FAL_API_KEY = st.secrets.get("FAL_API_KEY", os.getenv("FAL_API_KEY"))
+FAL_KEY = st.secrets.get("FAL_API_KEY", os.getenv("FAL_API_KEY"))
 if not FAL_API_KEY:
-    st.error("❌ FAL_API_KEY not found in secrets! Add it to Streamlit secrets.")
+    st.error("❌ FAL_KEY not found in secrets! Add it to Streamlit secrets.")
     st.stop()
 
-fal_client.api_key = FAL_API_KEY
+fal_client.api_key = FAL_KEY
 
 # Generate stable browser fingerprint
 FINGERPRINT = hashlib.sha256(f"{BACKEND_URL}".encode()).hexdigest()
