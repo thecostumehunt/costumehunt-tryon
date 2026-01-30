@@ -5,7 +5,6 @@ import time
 import hashlib
 import io
 from PIL import Image
-import base64
 
 # ----------------------------------
 # CONFIG
@@ -31,7 +30,7 @@ st.write("Upload your full-body photo and preview how a full outfit looks on you
 st.caption("Powered by TheCostumeHunt.com • Photos are processed temporarily and deleted.")
 
 # ----------------------------------
-# 🔑 DEVICE TOKEN — ROBUST & BACKWARDS COMPATIBLE
+# 🔑 DEVICE TOKEN
 # ----------------------------------
 query_params = st.query_params
 
@@ -40,61 +39,53 @@ def init_device_safely():
         token = query_params["device_token"][0]
         st.session_state.device_token = token
         return token
+
     if "device_token" in st.session_state:
         return st.session_state.device_token
+
     try:
         r = requests.get(f"{BACKEND_URL}/device/init", timeout=10)
-        r.raise_for_status()
-        data = r.json()
-        if "device_token" in data:
-            token = data["device_token"]
-            st.session_state.device_token = token
-            return token
+        if r.status_code == 200:
+            token = r.json().get("device_token")
+            if token:
+                st.session_state.device_token = token
+                return token
     except:
         pass
+
     try:
         r = requests.get(
-            f"{BACKEND_URL}/device/init", 
+            f"{BACKEND_URL}/device/init",
             headers={"X-Fingerprint": FINGERPRINT},
             timeout=10
         )
-        r.raise_for_status()
-        data = r.json()
-        token = data.get("device_token")
-        if token:
-            st.query_params.clear()
-            st.query_params["device_token"] = token
-            st.session_state.device_token = token
-            return token
+        if r.status_code == 200:
+            token = r.json().get("device_token")
+            if token:
+                st.query_params.clear()
+                st.query_params["device_token"] = token
+                st.session_state.device_token = token
+                return token
     except:
         pass
-    st.warning("🔄 Using anonymous mode - some features may be limited")
+
+    st.warning("⚠️ Anonymous mode – some features may be limited")
     return None
 
-try:
-    st.session_state.device_token = init_device_safely()
-except Exception as e:
-    st.error(f"❌ Device initialization failed: {str(e)[:100]}")
-    st.stop()
+st.session_state.device_token = init_device_safely()
 
-def api_headers(token=None):
-    headers = {}
-    if token or st.session_state.device_token:
-        headers["Authorization"] = f"Bearer {token or st.session_state.device_token}"
-    headers["X-Fingerprint"] = FINGERPRINT
+def api_headers():
+    headers = {"X-Fingerprint": FINGERPRINT}
+    if st.session_state.device_token:
+        headers["Authorization"] = f"Bearer {st.session_state.device_token}"
     return headers
 
-# DEBUG INFO
-if st.sidebar.checkbox("🛠️ Debug Info"):
-    st.sidebar.write(f"🔑 Device Token: {st.session_state.device_token[:10]}..." if st.session_state.device_token else "None")
-    st.sidebar.write(f"🖐️ Fingerprint: {FINGERPRINT}")
-
 # ----------------------------------
-# PAYMENT SUCCESS MESSAGE
+# DEBUG
 # ----------------------------------
-if query_params.get("checkout") == "success":
-    st.success("🎉 Payment successful! Credits added.")
-    st.rerun()
+if st.sidebar.checkbox("🛠 Debug"):
+    st.sidebar.write("Device:", st.session_state.device_token)
+    st.sidebar.write("Fingerprint:", FINGERPRINT)
 
 # ----------------------------------
 # FETCH CREDITS
@@ -102,218 +93,140 @@ if query_params.get("checkout") == "success":
 @st.cache_data(ttl=30)
 def get_credits():
     try:
-        r = requests.get(
-            f"{BACKEND_URL}/credits",
-            headers=api_headers(),
-            timeout=10
-        )
-        r.raise_for_status()
-        return r.json()
+        r = requests.get(f"{BACKEND_URL}/credits", headers=api_headers(), timeout=10)
+        if r.status_code == 200:
+            return r.json()
     except:
-        return None
+        pass
+    return None
 
-credits_data = get_credits()
-if credits_data:
-    st.info(f"💳 Credits left: {credits_data['credits']}")
+credits = get_credits()
+if credits:
+    st.info(f"💳 Credits left: {credits['credits']}")
 
 # ----------------------------------
 # SHOW LAST RESULT
 # ----------------------------------
 if "last_image" in st.session_state:
-    st.subheader("🖼 Your last try-on result")
+    st.subheader("🖼 Your last try-on")
     st.image(st.session_state.last_image, use_container_width=True)
-    try:
-        img_bytes = requests.get(st.session_state.last_image, timeout=10).content
-        st.download_button(
-            "⬇️ Download image",
-            data=img_bytes,
-            file_name="tryon.png",
-            mime="image/png"
-        )
-    except:
-        st.info("💾 Download unavailable")
-
-# ----------------------------------
-# FREE UNLOCK
-# ----------------------------------
-if credits_data and credits_data["credits"] == 0 and not credits_data.get("free_used", True):
-    st.subheader("🎁 Get your free try")
-    email = st.text_input("Enter your email to unlock your free try")
-    if st.button("Unlock free try", use_container_width=True):
-        try:
-            r = requests.post(
-                f"{BACKEND_URL}/free/unlock",
-                headers={**api_headers(), "Content-Type": "application/json"},
-                json={"email": email},
-                timeout=10
-            )
-            if r.status_code == 200:
-                st.success("✅ Free try unlocked!")
-                st.rerun()
-            else:
-                st.error(f"❌ Unlock failed: {r.text[:100]}")
-        except Exception as e:
-            st.error(f"❌ Network error: {str(e)}")
-
-# ----------------------------------
-# BUY CREDITS UI
-# ----------------------------------
-if credits_data and credits_data["credits"] == 0:
-    st.markdown("---")
-    st.subheader("✨ Buy Credits")
-    st.write("Secure checkout via LemonSqueezy")
-    c1, c2, c3 = st.columns(3)
-    @st.cache_data(ttl=60)
-    def create_checkout(pack: int):
-        try:
-            r = requests.post(
-                f"{BACKEND_URL}/lemon/create-link?pack={pack}",
-                headers=api_headers(),
-                timeout=20
-            )
-            if r.status_code == 200:
-                return r.json().get("checkout_url") or r.json().get("url")
-            return None
-        except:
-            return None
-    with c1:
-        if st.button("💳 5 credits ($2)", use_container_width=True):
-            link = create_checkout(5)
-            if link:
-                st.link_button("👉 Checkout →", link, type="primary", use_container_width=True)
-    with c2:
-        if st.button("💳 15 credits ($5)", use_container_width=True):
-            link = create_checkout(15)
-            if link:
-                st.link_button("👉 Checkout →", link, type="primary", use_container_width=True)
-    with c3:
-        if st.button("💳 100 credits ($20)", use_container_width=True):
-            link = create_checkout(100)
-            if link:
-                st.link_button("👉 Checkout →", link, type="primary", use_container_width=True)
 
 # ----------------------------------
 # USER INPUTS
 # ----------------------------------
 st.markdown("---")
-st.subheader("1. Upload your photo")
+st.subheader("1️⃣ Upload your photo")
+
 user_image = st.file_uploader(
-    "Upload a clear, full-body photo (JPG/PNG)",
-    type=["jpg", "jpeg", "png", "webp"],
-    help="Must show full body, front-facing, good lighting"
+    "Full-body photo (JPG / PNG / WEBP)",
+    type=["jpg", "jpeg", "png", "webp"]
 )
 
-st.subheader("2. Outfit image")
+st.subheader("2️⃣ Outfit image")
 cloth_url = st.query_params.get("cloth", "")
+
 if cloth_url:
-    try:
-        st.image(cloth_url, caption="Selected outfit", width=260)
-    except:
-        st.warning("❌ Invalid outfit image URL")
-        cloth_url = ""
+    st.image(cloth_url, width=260)
 else:
-    cloth_url = st.text_input(
-        "Paste outfit image URL", 
-        placeholder="https://example.com/outfit.jpg",
-        help="Direct link to clothing image (full outfit preferred)"
-    )
+    cloth_url = st.text_input("Paste outfit image URL")
 
 # ----------------------------------
-# SIMPLIFIED BACKGROUND REMOVAL (WORKING VERSION)
+# ✅ OFFICIAL FAL BACKGROUND REMOVAL
 # ----------------------------------
-def remove_background(image_bytes):
-    """Remove background using direct FAL API call - simplified and robust"""
+def remove_background(image_bytes: bytes) -> bytes:
+    """
+    Background removal using OFFICIAL FAL rembg model.
+    Independent and robust.
+    """
+
     if not FAL_KEY:
-        st.info("⚠️ No FAL_KEY - skipping background removal (using original image)")
+        st.warning("⚠️ No FAL_KEY – skipping background removal")
         return image_bytes
-    
+
     try:
-        # Create PIL image and save as PNG bytes (FAL prefers PNG)
-        pil_image = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
-        img_buffer = io.BytesIO()
-        pil_image.save(img_buffer, format="PNG")
-        img_buffer.seek(0)
-        png_bytes = img_buffer.read()
-        
-        # Convert to base64
-        image_b64 = base64.b64encode(png_bytes).decode('utf-8')
-        
-        # FAL expects simple input format for rembg
-        payload = {
-            "image_url": f"data:image/png;base64,{image_b64}",
-            "model": "u2net"
+        img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
+        buffer = io.BytesIO()
+        img.save(buffer, format="PNG")
+        buffer.seek(0)
+
+        files = {
+            "image": ("input.png", buffer, "image/png")
         }
-        
+
         headers = {
-            'Authorization': f'Key {FAL_KEY}',
-            'Content-Type': 'application/json'
+            "Authorization": f"Key {FAL_KEY}"
         }
-        
+
         st.info("🧹 Removing background...")
-        
-        response = requests.post(
-            "https://fal.run/fal-ai/rembg/enhance",
-            json=payload,
+
+        r = requests.post(
+            "https://fal.run/fal-ai/imageutils/rembg",
             headers=headers,
+            files=files,
             timeout=120
         )
-        
-        if response.status_code == 200:
-            result = response.json()
-            result_url = result['images'][0]
-            final_img = requests.get(result_url, timeout=30)
-            final_img.raise_for_status()
-            st.success("✅ Background removed!")
-            return final_img.content
-        else:
-            st.warning(f"⚠️ FAL API error {response.status_code}, using original")
-            return image_bytes
-            
+
+        r.raise_for_status()
+        data = r.json()
+
+        output_url = data["image"]["url"]
+        result_img = requests.get(output_url, timeout=30)
+        result_img.raise_for_status()
+
+        st.success("✅ Background removed")
+        return result_img.content
+
     except Exception as e:
-        st.warning(f"⚠️ Background removal failed: {str(e)[:50]}, using original")
+        st.warning(f"⚠️ Background removal failed – using original")
         return image_bytes
 
 # ----------------------------------
-# CLIENT-SIDE COOLDOWN & TRY-ON
+# COOLDOWN
 # ----------------------------------
 if "last_try_time" not in st.session_state:
     st.session_state.last_try_time = 0
 
-now = time.time()
-cooldown = now - st.session_state.last_try_time < 20
+cooldown = time.time() - st.session_state.last_try_time < 20
 
 col1, col2 = st.columns([4, 1])
 with col1:
-    generate_btn = st.button("✨ Generate Try-On", use_container_width=True, disabled=cooldown)
+    generate = st.button("✨ Generate Try-On", disabled=cooldown, use_container_width=True)
 with col2:
-    st.info(f"⏳ {int(20-(now-st.session_state.last_try_time)) if cooldown else 'Ready'}s")
+    st.info("⏳ Wait" if cooldown else "Ready")
 
-st.subheader("3. Processing...")
-
-if generate_btn:
+# ----------------------------------
+# TRY-ON PIPELINE
+# ----------------------------------
+if generate:
     if not user_image:
-        st.error("👆 Please upload your photo first")
-        st.stop()
-    if not cloth_url or cloth_url.strip() == "":
-        st.error("👆 Please provide outfit image URL")
-        st.stop()
-    if credits_data and credits_data["credits"] < 1:
-        st.error("💳 No credits remaining. Buy credits above!")
+        st.error("Please upload your photo")
         st.stop()
 
-    st.session_state.last_try_time = now
+    if not cloth_url:
+        st.error("Please provide outfit image URL")
+        st.stop()
 
-    with st.spinner("🎨 Creating virtual try-on (~30-60s)..."):
+    if credits and credits["credits"] < 1:
+        st.error("No credits remaining")
+        st.stop()
+
+    st.session_state.last_try_time = time.time()
+
+    with st.spinner("🎨 Processing (~30–60s)..."):
         try:
-            # STEP 1: Process image (background removal + fallback)
-            st.info("🧹 Step 1/2: Processing your photo...")
-            original_bytes = user_image.getvalue()
-            processed_bytes = remove_background(original_bytes)
+            # STEP 1: Background removal
+            processed_image = remove_background(user_image.getvalue())
 
-            # STEP 2: Try-on generation
-            st.info("👗 Step 2/2: Generating try-on...")
-            files = {"person_image": ("person_image.png", processed_bytes, "image/png")}
-            params = {"garment_url": cloth_url.strip()}
+            # Optional preview (comment out in production)
+            # st.image(processed_image, caption="Processed image", width=300)
+
+            # STEP 2: Try-on
+            files = {
+                "person_image": ("person.png", processed_image, "image/png")
+            }
+            params = {
+                "garment_url": cloth_url.strip()
+            }
 
             r = requests.post(
                 f"{BACKEND_URL}/tryon",
@@ -324,26 +237,24 @@ if generate_btn:
             )
 
             if r.status_code == 200:
-                data = r.json()
-                image_url = data.get("image_url")
+                image_url = r.json().get("image_url")
                 if image_url:
                     st.session_state.last_image = image_url
-                    st.success("🎉 Try-on generated successfully!")
+                    st.success("🎉 Try-on generated!")
                     st.rerun()
                 else:
-                    st.error("❌ No image URL in response")
-                    st.code(r.text[:500])
+                    st.error("No image URL returned")
             else:
-                st.error(f"❌ Backend error {r.status_code}")
-                st.code(r.text[:1000])
-                
+                st.error(f"Backend error {r.status_code}")
+                st.code(r.text[:500])
+
         except requests.exceptions.Timeout:
-            st.error("⏰ Request timed out (backend busy)")
+            st.error("⏰ Request timed out")
         except Exception as e:
-            st.error(f"❌ Network error: {str(e)}")
+            st.error(f"❌ Error: {str(e)}")
 
 # ----------------------------------
 # FOOTER
 # ----------------------------------
 st.markdown("---")
-st.markdown("🔒 Photos deleted after processing • 🩷 [TheCostumeHunt.com](https://thecostumehunt.com)")
+st.markdown("🔒 Photos deleted after processing • 🩷 https://thecostumehunt.com")
