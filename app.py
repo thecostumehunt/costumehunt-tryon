@@ -5,9 +5,15 @@ import os
 # ----------------------------------
 # CONFIG
 # ----------------------------------
-st.set_page_config(page_title="The Costume Hunt – Try On", layout="centered")
+st.set_page_config(
+    page_title="The Costume Hunt – Try On",
+    layout="centered"
+)
 
-BACKEND_URL = os.getenv("BACKEND_URL", "https://tryon-backend-5wf1.onrender.com")
+BACKEND_URL = os.getenv(
+    "BACKEND_URL",
+    "https://tryon-backend-5wf1.onrender.com"
+)
 
 # ----------------------------------
 # PAGE HEADER
@@ -23,9 +29,7 @@ if "device_token" not in st.session_state:
     try:
         r = requests.get(f"{BACKEND_URL}/device/init", timeout=10)
         data = r.json()
-        if "device_token" in data:
-            st.session_state.device_token = data["device_token"]
-        st.session_state.device = data
+        st.session_state.device_token = data["device_token"]
     except Exception:
         st.error("❌ Backend not reachable.")
         st.stop()
@@ -54,6 +58,67 @@ if credits_data:
     st.info(f"💳 Credits left: {credits_data['credits']}")
 
 # ----------------------------------
+# PAYMENT HELPER (AUTO REDIRECT)
+# ----------------------------------
+def redirect_to_checkout(pack: int):
+    try:
+        r = requests.post(
+            f"{BACKEND_URL}/lemon/create-link?pack={pack}",
+            headers=api_headers(),
+            timeout=20
+        )
+
+        if r.status_code == 200:
+            checkout_url = r.json()["checkout_url"]
+
+            st.success("🔁 Redirecting to secure checkout...")
+            st.markdown(
+                f"""
+                <meta http-equiv="refresh" content="0;url={checkout_url}">
+                """,
+                unsafe_allow_html=True
+            )
+            st.stop()
+
+        st.error("❌ Payment could not be initiated")
+        st.code(r.text)
+
+    except Exception as e:
+        st.error("❌ Payment error")
+        st.code(str(e))
+
+# ----------------------------------
+# BUY CREDITS UI (AUTO REDIRECT)
+# ----------------------------------
+if credits_data and credits_data["credits"] == 0:
+
+    st.markdown("---")
+    st.subheader("✨ Buy Credits")
+    st.write("You’ll be redirected to a secure checkout page.")
+
+    c1, c2, c3 = st.columns(3)
+
+    with c1:
+        st.markdown("### 5 Tries")
+        st.markdown("**$2**")
+        if st.button("Buy 5 Credits", use_container_width=True):
+            redirect_to_checkout(5)
+
+    with c2:
+        st.markdown("### 15 Tries")
+        st.markdown("**$5**")
+        if st.button("Buy 15 Credits", use_container_width=True):
+            redirect_to_checkout(15)
+
+    with c3:
+        st.markdown("### 100 Tries")
+        st.markdown("**$20**")
+        if st.button("Buy 100 Credits", use_container_width=True):
+            redirect_to_checkout(100)
+
+    st.caption("💡 After payment, you’ll be redirected back and credits will appear automatically.")
+
+# ----------------------------------
 # SHOW LAST RESULT
 # ----------------------------------
 if "last_image" in st.session_state:
@@ -70,98 +135,6 @@ if "last_image" in st.session_state:
         )
     except Exception:
         pass
-
-# ----------------------------------
-# FREE UNLOCK
-# ----------------------------------
-if credits_data and credits_data["credits"] == 0 and not credits_data.get("free_used", True):
-    st.subheader("🎁 Get your free try")
-    email = st.text_input("Enter your email to unlock your free try")
-
-    if st.button("Unlock free try"):
-        try:
-            r = requests.post(
-                f"{BACKEND_URL}/free/unlock",
-                headers=api_headers(),
-                json={"email": email},
-                timeout=10
-            )
-            if r.status_code == 200:
-                st.success("✅ Free try unlocked!")
-                st.rerun()
-            else:
-                st.error("❌ Unlock failed")
-                st.code(r.text)
-        except Exception as e:
-            st.error(f"Error: {str(e)}")
-
-# ----------------------------------
-# PAYMENT HELPER
-# ----------------------------------
-def create_checkout(pack: int):
-    try:
-        r = requests.post(
-            f"{BACKEND_URL}/lemon/create-link?pack={pack}",
-            headers=api_headers(),
-            timeout=20
-        )
-
-        if r.status_code == 200:
-            data = r.json()
-            return data.get("checkout_url")
-
-        st.error("❌ Backend error while creating checkout")
-        st.code(r.text, language="json")
-        return None
-
-    except Exception as e:
-        st.error("❌ Connection error")
-        st.code(str(e))
-        return None
-
-# ----------------------------------
-# BUY CREDITS UI
-# ----------------------------------
-if credits_data and credits_data["credits"] == 0:
-
-    st.markdown("---")
-    st.subheader("✨ Buy Credits")
-    st.write("Instant credits via LemonSqueezy (test mode)")
-
-    c1, c2, c3 = st.columns(3)
-
-    with c1:
-        st.markdown("**5 tries**")
-        st.markdown("$2")
-        if st.button("💳 Buy 5 credits", key="buy5", use_container_width=True):
-            with st.spinner("🔄 Creating checkout..."):
-                link = create_checkout(5)
-                if link:
-                    st.success("✅ Checkout ready!")
-                    st.link_button("👉 Pay $2 Now", link, use_container_width=True, type="primary")
-
-    with c2:
-        st.markdown("**15 tries**")
-        st.markdown("$5")
-        if st.button("💳 Buy 15 credits", key="buy15", use_container_width=True):
-            with st.spinner("🔄 Creating checkout..."):
-                link = create_checkout(15)
-                if link:
-                    st.success("✅ Checkout ready!")
-                    st.link_button("👉 Pay $5 Now", link, use_container_width=True, type="primary")
-
-    with c3:
-        st.markdown("**100 tries**")
-        st.markdown("$20")
-        if st.button("💳 Buy 100 credits", key="buy100", use_container_width=True):
-            with st.spinner("🔄 Creating checkout..."):
-                link = create_checkout(100)
-                if link:
-                    st.success("✅ Checkout ready!")
-                    st.link_button("👉 Pay $20 Now", link, use_container_width=True, type="primary")
-
-    st.markdown("---")
-    st.caption("💡 Test payments only • Credits added via webhook")
 
 # ----------------------------------
 # USER INPUTS
@@ -223,5 +196,3 @@ if st.button("✨ Try it on", use_container_width=True):
 st.markdown("---")
 st.write("🔒 Photos deleted after processing")
 st.write("🩷 TheCostumeHunt.com")
-
-
