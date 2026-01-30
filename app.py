@@ -5,6 +5,7 @@ import time
 import hashlib
 import io
 from PIL import Image
+import fal_client
 
 # ----------------------------------
 # CONFIG
