@@ -30,30 +30,33 @@ query_params = st.query_params
 
 
 def get_or_create_device_token():
-    # 1️⃣ token already in URL
+    # 1️⃣ Token in URL (highest priority)
     if "device_token" in query_params:
-        token = query_params["device_token"]
-        if isinstance(token, str) and token.count(".") == 2:
-            return token
+        return query_params["device_token"]
 
-    # 2️⃣ token already in session
+    # 2️⃣ Token already in session
     if "device_token" in st.session_state:
         return st.session_state.device_token
 
-    # 3️⃣ create new device
+    # 3️⃣ Ask backend to initialize device
     r = requests.get(f"{BACKEND_URL}/device/init", timeout=10)
     r.raise_for_status()
     data = r.json()
 
+    # Backend only returns device_token when a NEW device is created
     token = data.get("device_token")
-    if not token:
-        raise RuntimeError("Backend did not return device_token")
 
-    # normalize URL (critical)
-    st.query_params.clear()
-    st.query_params["device_token"] = token
+    if token:
+        # persist token in URL for refresh & payment return
+        st.query_params.clear()
+        st.query_params["device_token"] = token
+        return token
 
-    return token
+    # If we reach here, backend recognized device
+    # but frontend had no token → this is a hard error
+    raise RuntimeError(
+        "Backend recognized device but no device_token present in frontend"
+    )
 
 
 # ---- initialize device ----
@@ -75,10 +78,10 @@ def api_headers():
 # PAYMENT SUCCESS MESSAGE (UI ONLY)
 # ----------------------------------
 if query_params.get("checkout") == "success":
-    st.success("🎉 Payment successful! Credits have been added to your account.")
+    st.success("🎉 Payment successful! Credits have been added.")
 
 # ----------------------------------
-# FETCH CREDITS (AUTHORITATIVE)
+# FETCH CREDITS (SOURCE OF TRUTH)
 # ----------------------------------
 credits_data = None
 try:
@@ -258,4 +261,3 @@ if st.button("✨ Try it on", use_container_width=True):
 st.markdown("---")
 st.write("🔒 Photos deleted after processing")
 st.write("🩷 TheCostumeHunt.com")
-
