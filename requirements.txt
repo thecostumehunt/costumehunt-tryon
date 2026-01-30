@@ -1,5 +1,11 @@
-streamlit
-pillow
+fastapi
+uvicorn[standard]
+sqlalchemy
+psycopg2-binary
+python-dotenv
+python-jose[cryptography]
 requests
+pillow
 fal-client
-streamlit-cookies-manager
+httpx
+python-multipart
