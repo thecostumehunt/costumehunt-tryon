@@ -24,44 +24,44 @@ st.write("Upload your full-body photo and preview how a full outfit looks on you
 st.caption("Powered by TheCostumeHunt.com • Photos are processed temporarily and deleted.")
 
 # ----------------------------------
-# 🔑 DEVICE TOKEN — SINGLE SOURCE OF TRUTH
+# 🔑 DEVICE TOKEN — SAFE & DEFENSIVE
 # ----------------------------------
 query_params = st.query_params
 
 
-def get_or_create_device_token():
-    # 1️⃣ Token in URL (highest priority)
+def init_device_safely():
+    # 1️⃣ token already in URL
     if "device_token" in query_params:
         return query_params["device_token"]
 
-    # 2️⃣ Token already in session
+    # 2️⃣ token already in session
     if "device_token" in st.session_state:
         return st.session_state.device_token
 
-    # 3️⃣ Ask backend to initialize device
+    # 3️⃣ ask backend (NO assumptions)
     r = requests.get(f"{BACKEND_URL}/device/init", timeout=10)
     r.raise_for_status()
     data = r.json()
 
-    # Backend only returns device_token when a NEW device is created
     token = data.get("device_token")
 
+    # ✅ if backend returned token → persist it
     if token:
-        # persist token in URL for refresh & payment return
         st.query_params.clear()
         st.query_params["device_token"] = token
         return token
 
-    # If we reach here, backend recognized device
-    # but frontend had no token → this is a hard error
+    # ✅ if backend did NOT return token
+    # this means backend already recognizes device
+    # frontend just continues WITHOUT crashing
     raise RuntimeError(
-        "Backend recognized device but no device_token present in frontend"
+        "Device exists but no device_token returned. "
+        "Please refresh once."
     )
 
 
-# ---- initialize device ----
 try:
-    st.session_state.device_token = get_or_create_device_token()
+    st.session_state.device_token = init_device_safely()
 except Exception as e:
     st.error("❌ Device initialization failed")
     st.code(str(e))
@@ -125,45 +125,36 @@ if credits_data and credits_data["credits"] == 0 and not credits_data.get("free_
     email = st.text_input("Enter your email to unlock your free try")
 
     if st.button("Unlock free try"):
-        try:
-            r = requests.post(
-                f"{BACKEND_URL}/free/unlock",
-                headers=api_headers(),
-                json={"email": email},
-                timeout=10
-            )
-            if r.status_code == 200:
-                st.success("✅ Free try unlocked!")
-                st.rerun()
-            else:
-                st.error("❌ Unlock failed")
-                st.code(r.text)
-        except Exception as e:
-            st.error("❌ Request failed")
-            st.code(str(e))
+        r = requests.post(
+            f"{BACKEND_URL}/free/unlock",
+            headers=api_headers(),
+            json={"email": email},
+            timeout=10
+        )
+
+        if r.status_code == 200:
+            st.success("✅ Free try unlocked!")
+            st.rerun()
+        else:
+            st.error("❌ Unlock failed")
+            st.code(r.text)
 
 # ----------------------------------
 # PAYMENT HELPER
 # ----------------------------------
 def create_checkout(pack: int):
-    try:
-        r = requests.post(
-            f"{BACKEND_URL}/lemon/create-link?pack={pack}",
-            headers=api_headers(),
-            timeout=20
-        )
+    r = requests.post(
+        f"{BACKEND_URL}/lemon/create-link?pack={pack}",
+        headers=api_headers(),
+        timeout=20
+    )
 
-        if r.status_code == 200:
-            return r.json().get("checkout_url")
+    if r.status_code == 200:
+        return r.json().get("checkout_url")
 
-        st.error("❌ Backend error while creating checkout")
-        st.code(r.text)
-        return None
-
-    except Exception as e:
-        st.error("❌ Connection error")
-        st.code(str(e))
-        return None
+    st.error("❌ Backend error while creating checkout")
+    st.code(r.text)
+    return None
 
 # ----------------------------------
 # BUY CREDITS UI
@@ -213,7 +204,7 @@ else:
 st.subheader("3. Generate try-on")
 
 # ----------------------------------
-# CLIENT-SIDE COOLDOWN (UX ONLY)
+# CLIENT-SIDE COOLDOWN
 # ----------------------------------
 now = time.time()
 last_try = st.session_state.get("last_try_time", 0)
@@ -247,8 +238,7 @@ if st.button("✨ Try it on", use_container_width=True):
         )
 
         if r.status_code == 200:
-            data = r.json()
-            st.session_state.last_image = data["image_url"]
+            st.session_state.last_image = r.json()["image_url"]
             st.success("🎉 Try-on ready!")
             st.rerun()
         else:
