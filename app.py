@@ -240,52 +240,18 @@ else:
     )
 
 
+from rembg import remove
+
 def remove_background(image_bytes):
     """
-    FAL Python SDK – version-safe implementation.
-    Uses a temporary file on disk (works in all versions).
+    Local background removal using rembg.
+    Fast, free, no API calls.
     """
-    if not FAL_KEY:
-        st.error("❌ FAL_KEY not configured")
-        return None
-
     try:
-        import fal_client
-        import tempfile
-
-        def on_queue_update(update):
-            if hasattr(update, "logs") and update.logs:
-                for log in update.logs:
-                    print(log.get("message", ""))
-
-        # 1️⃣ Write image to temp file
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-            tmp.write(image_bytes)
-            tmp_path = tmp.name
-
-        # 2️⃣ Pass REAL file handle to FAL
-        with open(tmp_path, "rb") as f:
-            result = fal_client.subscribe(
-                "fal-ai/imageutils/rembg",
-                arguments={
-                    "image": f   # ✅ THIS WORKS
-                },
-                with_logs=True,
-                on_queue_update=on_queue_update,
-            )
-
-        # 3️⃣ Extract result
-        output_url = result["image"]["url"]
-
-        # 4️⃣ Download processed image
-        final = requests.get(output_url, timeout=30)
-        final.raise_for_status()
-        return final.content
-
+        return remove(image_bytes)
     except Exception as e:
         st.error(f"❌ Background removal failed: {e}")
         return None
-
 
 
 # ----------------------------------
