@@ -9,3 +9,5 @@ pillow
 fal-client
 httpx
 python-multipart
+rembg
+onnxruntime
