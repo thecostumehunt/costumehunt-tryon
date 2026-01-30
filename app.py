@@ -24,35 +24,48 @@ st.write("Upload your full-body photo and preview how a full outfit looks on you
 st.caption("Powered by TheCostumeHunt.com • Photos are processed temporarily and deleted.")
 
 # ----------------------------------
-# 🔑 DEVICE TOKEN — SINGLE SOURCE OF TRUTH
+# 🔑 DEVICE TOKEN (SINGLE SOURCE OF TRUTH)
 # ----------------------------------
 query_params = st.query_params
 
 def get_or_create_device_token():
-    # 1. URL has token (highest priority)
+    # 1️⃣ token already in URL (after checkout return)
     if "device_token" in query_params:
-        return query_params["device_token"]
+        token = query_params["device_token"]
 
-    # 2. Session already has token
+        # 🔒 JWT sanity check (must have 2 dots)
+        if isinstance(token, str) and token.count(".") == 2:
+            return token
+
+        # corrupted token → reset
+        st.query_params.clear()
+        st.session_state.clear()
+        st.rerun()
+
+    # 2️⃣ token already in session
     if "device_token" in st.session_state:
         return st.session_state.device_token
 
-    # 3. Create new device
+    # 3️⃣ create new device
     r = requests.get(f"{BACKEND_URL}/device/init", timeout=10)
     r.raise_for_status()
+
     token = r.json()["device_token"]
 
-    # normalize URL (VERY IMPORTANT)
+    # persist token in URL (critical)
     st.query_params.clear()
     st.query_params["device_token"] = token
 
     return token
 
+
 try:
     st.session_state.device_token = get_or_create_device_token()
-except Exception:
-    st.error("❌ Backend not reachable.")
+except Exception as e:
+    st.error("❌ Device initialization failed")
+    st.code(str(e))
     st.stop()
+
 
 def api_headers():
     return {
@@ -64,7 +77,7 @@ def api_headers():
 # PAYMENT SUCCESS MESSAGE (UI ONLY)
 # ----------------------------------
 if query_params.get("checkout") == "success":
-    st.success("🎉 Payment successful! Credits have been added.")
+    st.success("🎉 Payment successful! Credits have been added to your account.")
 
 # ----------------------------------
 # FETCH CREDITS (AUTHORITATIVE)
@@ -76,22 +89,21 @@ try:
         headers=api_headers(),
         timeout=10
     )
+    r.raise_for_status()
     credits_data = r.json()
-except Exception:
-    st.warning("⚠️ Could not fetch credits.")
+except Exception as e:
+    st.error("❌ Failed to fetch credits")
+    st.code(str(e))
+    st.stop()
 
-if credits_data:
-    st.info(f"💳 Credits left: {credits_data['credits']}")
+st.info(f"💳 Credits left: {credits_data['credits']}")
 
 # ----------------------------------
 # SHOW LAST RESULT
 # ----------------------------------
 if "last_image" in st.session_state:
     st.subheader("🖼 Your last try-on result")
-    st.image(
-        st.session_state.last_image,
-        use_container_width=True
-    )
+    st.image(st.session_state.last_image, use_container_width=True)
 
     try:
         img_bytes = requests.get(st.session_state.last_image).content
@@ -101,15 +113,16 @@ if "last_image" in st.session_state:
             file_name="tryon.png",
             mime="image/png"
         )
-    except Exception:
+    except:
         pass
 
 # ----------------------------------
-# FREE UNLOCK
+# FREE UNLOCK (BACKEND ENFORCES ABUSE RULES)
 # ----------------------------------
-if credits_data and credits_data["credits"] == 0 and not credits_data.get("free_used", True):
+if credits_data["credits"] == 0 and not credits_data.get("free_used", True):
+
     st.subheader("🎁 Get your free try")
-    email = st.text_input("Enter your email to unlock your free try")
+    email = st.text_input("Enter your email")
 
     if st.button("Unlock free try"):
         try:
@@ -119,17 +132,20 @@ if credits_data and credits_data["credits"] == 0 and not credits_data.get("free_
                 json={"email": email},
                 timeout=10
             )
+
             if r.status_code == 200:
-                st.success("✅ Free try unlocked!")
+                st.success("✅ Free credit unlocked!")
                 st.rerun()
             else:
-                st.error("❌ Unlock failed")
+                st.error("❌ Free credit unavailable")
                 st.code(r.text)
+
         except Exception as e:
-            st.error(f"Error: {str(e)}")
+            st.error("❌ Error unlocking free credit")
+            st.code(str(e))
 
 # ----------------------------------
-# PAYMENT HELPER (DO NOT TOUCH URL)
+# PAYMENT HELPER
 # ----------------------------------
 def create_checkout(pack: int):
     try:
@@ -142,19 +158,19 @@ def create_checkout(pack: int):
         if r.status_code == 200:
             return r.json()["checkout_url"]
 
-        st.error("❌ Backend error while creating checkout")
+        st.error("❌ Checkout creation failed")
         st.code(r.text)
         return None
 
     except Exception as e:
-        st.error("❌ Connection error")
+        st.error("❌ Backend error")
         st.code(str(e))
         return None
 
 # ----------------------------------
 # BUY CREDITS UI
 # ----------------------------------
-if credits_data and credits_data["credits"] == 0:
+if credits_data["credits"] == 0:
 
     st.markdown("---")
     st.subheader("✨ Buy Credits")
@@ -217,7 +233,7 @@ if st.button("✨ Try it on", use_container_width=True):
         st.warning("Please upload your photo and provide outfit image.")
         st.stop()
 
-    if not credits_data or credits_data["credits"] < 1:
+    if credits_data["credits"] < 1:
         st.warning("You need credits to continue.")
         st.stop()
 
